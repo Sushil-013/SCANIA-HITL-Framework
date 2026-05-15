@@ -1,7 +1,31 @@
+PROPRIETARY AND CONFIDENTIAL SOFTWARE LICENSE
+
 Copyright (c) 2026 Scania CV AB and Linköping University. 
 All rights reserved.
 
-This software was developed as part of a Master's Thesis project. 
-It is proprietary and confidential. Unauthorized copying, transferring, 
-distribution, or reproduction of this codebase, via any medium, 
-is strictly prohibited without explicit written permission from the authors and Scania CV AB.
+Authors: Sushil Krishna Vadakkekara Puthan Veedu and Sajath Salim
+Project: SCANIA EATS HITL Framework (Master's Thesis)
+
+1. PURPOSE AND CONTEXT
+This software architecture, codebase, and associated documentation (collectively, the "Software") were developed as part of a Master's Thesis project at Linköping University, in direct collaboration with Scania CV AB (Exhaust Aftertreatment System Development). The Software contains proprietary workflows, parametric logic, and intellectual property explicitly tailored for Scania CV AB's engineering and Product Lifecycle Management (PLM) environment.
+
+2. GRANT OF USAGE (RESTRICTED)
+This Software is not Open Source. It is provided strictly for:
+  a) Academic evaluation, grading, and peer review by authorized faculty and examiners at Linköping University.
+  b) Internal evaluation, research, and development by authorized personnel at Scania CV AB.
+
+3. PROHIBITED ACTIONS
+Unless explicit, prior written permission is granted by Scania CV AB and the Authors, you are strictly prohibited from:
+  a) Copying, reproducing, or duplicating the Software, in whole or in part.
+  b) Distributing, transmitting, or publishing the Software to the public or any unauthorized third party.
+  c) Modifying, translating, reverse-engineering, decompiling, or disassembling the Software.
+  d) Using the Software, or any concepts, algorithms, or architectures derived from it, for commercial purposes, financial gain, or integration into competing industrial systems.
+
+4. INTELLECTUAL PROPERTY
+All title, ownership rights, and intellectual property rights in and to the Software and any copies thereof shall remain with the Authors and Scania CV AB, subject to the academic copyright regulations of Linköping University and the prevailing Swedish intellectual property laws.
+
+5. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS, LINKÖPING UNIVERSITY, OR SCANIA CV AB BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE, ITS USE, OR OTHER DEALINGS IN THE SOFTWARE (INCLUDING, BUT NOT LIMITED TO, CORRUPTION OF CAD DATA OR INTERRUPTION OF BUSINESS).
+
+6. GOVERNING LAW
+This License shall be governed by and construed in accordance with the laws of Sweden.

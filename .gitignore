@@ -17,3 +17,8 @@ venv/
 env/
 # Security (NEVER UPLOAD API KEYS)
 .env
+# Ignore Generated Reports
+reports/
+*.html
+# Ignore Scania input drawings
+agents/Drawings/

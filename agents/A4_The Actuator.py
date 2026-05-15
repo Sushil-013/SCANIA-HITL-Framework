@@ -362,25 +362,46 @@ def _global_unhide(catia, active_doc, root_product):
 
 def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
     """
-    Single CATIA screenshot approach — eliminates CATIA camera control dependency:
-      1. Reframe on both clashing parts → capture ONE screenshot.
-      2. Save exact camera state (origin, sight, up, sight_dist).
-      3. Project 3D clash coordinates → pixel (px, py) in that screenshot using
-         orthographic projection (CATIA V5 default).
-      4. Pillow crops a tight window around (px, py) for the ZOOMED CLASH VIEW.
-         This guarantees the clash point is exactly at the centre of the crop.
-      5. Draw clash marker at the crop centre — always correct by construction.
-    Returns montage PNG path.
-    """
-    import math as _math
+    4-View 2×2 Grid Montage — Isometric / Top / Front / Side.
 
+    Pipeline
+    ────────
+    1. Save the user's original CATIA viewpoint so it can be restored at the end.
+    2. Loop over four camera angles, each targeting the clash coordinates:
+         • Set vp.PutSightDirection / vp.PutUpDirection
+         • Set vp.PutTargetPoint (clash coords)  → tight zoom via SightDistance=150
+         • Capture a .bmp screenshot to a temp file
+    3. Open the 4 bitmaps in Pillow, crop the left 20 % (spec tree) off every one,
+       resize each to a common cell size, and stitch into a 2×2 canvas.
+    4. Overlay:
+         • Semi-transparent dark label band on every quadrant  (view name)
+         • One master Clash HUD badge (type, penetration, part names) in the
+           top-right corner of the complete montage.
+    5. Save the final .png, delete the 4 temp .bmp files, return the .png path.
+    6. On any fatal error fall back to _make_fallback_image().
+    """
     tmp_dir  = tempfile.gettempdir()
     out_path = os.path.join(tmp_dir, f'_catia_clash_montage_{clash_idx}.png')
 
+    # Four camera angles: (label, sight_direction, up_direction)
+    VIEWS = [
+        ("ISOMETRIC VIEW", [-1.0, -1.0, -1.0], [0.0,  0.0, 1.0]),
+        ("TOP VIEW",       [ 0.0,  0.0, -1.0], [0.0,  1.0, 0.0]),
+        ("FRONT VIEW",     [ 0.0,  1.0,  0.0], [0.0,  0.0, 1.0]),
+        ("BOTTOM VIEW",    [ 0.0,  0.0,  1.0], [0.0, -1.0, 0.0]),
+    ]
+
+    # ── Convenience: normalise a 3-vector ─────────────────────────────────────
+    import math as _math
+    def _vnorm(v):
+        m = _math.sqrt(sum(x * x for x in v))
+        return [x / m for x in v] if m > 0 else list(v)
+
+    # ── Access viewer ─────────────────────────────────────────────────────────
     try:
         viewer = catia.ActiveWindow.ActiveViewer
     except Exception as e:
-        print(f"    [SVG] Cannot access viewer: {e}")
+        print(f"    [CAM] Cannot access viewer: {e}")
         return _make_fallback_image(clash_result, out_path)
 
     fp     = clash_result.get("first_product")
@@ -395,50 +416,129 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
         saved_sight      = list(vp.GetSightDirection())
         saved_up         = list(vp.GetUpDirection())
         saved_sight_dist = float(vp.SightDistance)
-    except Exception:
-        pass
+        print("    [CAM] Original viewpoint saved.")
+    except Exception as e:
+        print(f"    [CAM] Could not save original viewpoint (non-fatal): {e}")
 
-    # ── ONE screenshot: reframe on both clashing parts ────────────────────────
-    def _catia_capture(viewer, idx, label):
-        tmp = tempfile.gettempdir()
-        for fmt_id, ext in ((3, '.png'), (0, '.bmp')):
-            p = os.path.join(tmp, f'_catia_clash_{label}_{idx}{ext}')
+    # ── Set CATIA viewer background to white before captures ─────────────────
+    # This is the only reliable way to get a white background — pixel-swapping
+    # post-processing corrupts anti-aliased geometry edges.
+    saved_bg_color = None
+    try:
+        saved_bg_color = viewer.BackgroundColor
+        viewer.BackgroundColor = 16777215  # 0xFFFFFF = white
+        viewer.Update()
+        print("    [CAM] Background set to white.")
+    except Exception as e:
+        print(f"    [CAM] Could not set background color (non-fatal): {e}")
+
+    # ── Isolate the clashing pair so the scene is clean ───────────────────────
+    try:
+        root_product = active_doc.Product
+        _isolate_pair(active_doc, root_product, fp, sp)
+    except Exception as e:
+        print(f"    [CAM] _isolate_pair failed (non-fatal): {e}")
+
+    # Force CATIA to recalculate the bounding box BEFORE touching the camera.
+    # Without this, the viewer is 'confused' after isolating parts and the
+    # Viewpoint3D properties (SightDistance, Origin, etc.) raise COM errors.
+    try:
+        viewer.Reframe()
+        viewer.Update()
+        time.sleep(0.2)
+        print("    [CAM] Reframe after isolate: OK.")
+    except Exception as e:
+        print(f"    [CAM] Reframe after isolate failed (non-fatal): {e}")
+
+    # ── Helper: capture one screenshot ───────────────────────────────────────
+    def _take_bmp(label_key, idx):
+        """Set camera and capture a screenshot; return (path, success).
+
+        CATIA's CaptureToFile format reliability varies by installation and
+        projection mode.  We try three formats in order of Pillow
+        compatibility — PNG (3) → JPEG (1) → BMP (0) — and return the first
+        file that Pillow can actually open.  This prevents the
+        'cannot identify image file' error caused by CATIA writing an
+        incomplete or proprietary BMP when fmt=0 is used directly.
+        """
+        view_label, sight, up = None, None, None
+        for vl, s, u in VIEWS:
+            if vl == label_key:
+                view_label, sight, up = vl, s, u
+                break
+
+        slug = label_key.split()[0].lower()
+        # Candidate (format_id, extension) pairs — most reliable first.
+        FORMAT_ATTEMPTS = [(3, '.png'), (1, '.jpg'), (0, '.bmp')]
+
+        try:
+            vp = viewer.Viewpoint3D
+
+            # 1. Set the desired view angle.
+            vp.PutSightDirection(_vnorm(sight))
+            vp.PutUpDirection(_vnorm(up))
+
+            # 2. Plain Reframe — no selection needed.
+            #    _isolate_pair() already hid every part except fp and sp, so
+            #    viewer.Reframe() fits exactly those two visible objects.
+            #    Using sel.Add() here was causing silent failures (wrong COM
+            #    reference type for the bracket product), making Reframe fit
+            #    only the screw and leaving the bracket out of frame.
             try:
-                viewer.CaptureToFile(fmt_id, p)
-                time.sleep(0.6)
-                if os.path.isfile(p) and os.path.getsize(p) > 2000:
-                    return p, True
+                viewer.Reframe()
+            except Exception as rfe:
+                print(f"    [CAM] Reframe failed for {label_key} (non-fatal): {rfe}")
+
+            # 3. Per-view zoom factor after Reframe.
+            #    Front View: strong zoom-in so the thin bracket edge-on is visible.
+            #    Top / Bottom: slight zoom-out so the CATIA toolbar bands don't
+            #                  clip the top/bottom edges of the geometry.
+            #    Others: modest tighten to reduce black margins.
+            if label_key == "FRONT VIEW":
+                ZOOM_FACTOR = 2.8
+            elif label_key in ("TOP VIEW", "BOTTOM VIEW"):
+                ZOOM_FACTOR = 0.85
+            else:
+                ZOOM_FACTOR = 1.2
+            try:
+                vp.Zoom = vp.Zoom * ZOOM_FACTOR
             except Exception:
                 pass
-        return os.path.join(tmp, f'_catia_clash_{label}_{idx}.bmp'), False
 
-    ov_captured = False
-    path_ov = os.path.join(tmp_dir, f'_catia_clash_ov_{clash_idx}.png')
-    # Capture camera state AFTER reframe (used for projection)
-    cam_origin = cam_sight = cam_up = cam_dist = None
-    try:
-        sel = active_doc.Selection
-        sel.Clear()
-        if fp: sel.Add(fp)
-        if sp: sel.Add(sp)
-        viewer.Reframe()
-        sel.Clear()
-        viewer.Update()
-        time.sleep(0.5)
-        # Save camera state right after Reframe — this is what the screenshot sees
-        try:
-            vp2        = viewer.Viewpoint3D
-            cam_origin = list(vp2.GetOrigin())
-            cam_sight  = list(vp2.GetSightDirection())
-            cam_up     = list(vp2.GetUpDirection())
-            cam_dist   = float(vp2.SightDistance)
-        except Exception:
-            pass
-        path_ov, ov_captured = _catia_capture(viewer, clash_idx, 'ov')
-        if ov_captured:
-            print(f"    [SVG] Context shot saved: {path_ov}")
-    except Exception as e:
-        print(f"    [SVG] Context shot failed: {e}")
+            viewer.Update()
+            time.sleep(0.5)
+
+            # Try each format until Pillow can open the result.
+            for fmt_id, ext in FORMAT_ATTEMPTS:
+                cap_path = os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}{ext}')
+                try:
+                    viewer.CaptureToFile(fmt_id, cap_path)
+                    time.sleep(0.8)   # give CATIA time to flush the file
+                    if os.path.isfile(cap_path) and os.path.getsize(cap_path) > 2000:
+                        # Verify Pillow can actually decode it before accepting.
+                        from PIL import Image as _PIL_Image
+                        try:
+                            with _PIL_Image.open(cap_path) as _probe:
+                                _probe.verify()   # raises if corrupt / unknown
+                            print(f"    [CAM] Captured {label_key} (fmt={fmt_id}): {cap_path}")
+                            return cap_path, True
+                        except Exception:
+                            pass   # this format unreadable — try next
+                except Exception:
+                    pass
+
+            print(f"    [CAM] All format attempts failed for {label_key}.")
+            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False
+
+        except Exception as e:
+            print(f"    [CAM] Capture failed for {label_key}: {e}")
+            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False
+
+    # ── Shoot all 4 views ─────────────────────────────────────────────────────
+    captured_paths = []   # list of (label, path, ok)
+    for view_label, sight, up in VIEWS:
+        path, ok = _take_bmp(view_label, clash_idx)
+        captured_paths.append((view_label, path, ok))
 
     # ── Restore original viewpoint ────────────────────────────────────────────
     if saved_origin is not None:
@@ -449,158 +549,113 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
             vp.PutUpDirection(saved_up)
             vp.SightDistance = saved_sight_dist
             viewer.Update()
+            print("    [CAM] Original viewpoint restored.")
+        except Exception as e:
+            print(f"    [CAM] Could not restore viewpoint (non-fatal): {e}")
+
+    # ── Restore original background color ─────────────────────────────────────
+    if saved_bg_color is not None:
+        try:
+            viewer.BackgroundColor = saved_bg_color
+            viewer.Update()
         except Exception:
             pass
 
-    if not ov_captured:
-        print("    [SVG] Screenshot failed — generating fallback image.")
+    # ── Check we have at least one usable capture ─────────────────────────────
+    any_ok = any(ok for _, _, ok in captured_paths)
+    if not any_ok:
+        print("    [CAM] All 4 captures failed — generating fallback image.")
         return _make_fallback_image(clash_result, out_path)
 
-    # ── Pillow processing ─────────────────────────────────────────────────────
+    # ── Pillow: build 2×2 montage ─────────────────────────────────────────────
     try:
-        raw = Image.open(path_ov).convert("RGB")
-        RW, RH = raw.size
-
-        # Panel size constants
-        CTX_W, CTX_H = 380, 280    # context thumbnail
-        DET_W, DET_H = 980, 640    # detail panel
-        SEP          = 8
-        LABEL_H      = 46
-
-        # ── Orthographic projection helpers ───────────────────────────────────
-        def _vdot(a, b): return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]
-        def _vnorm(v):
-            m = _math.sqrt(sum(x*x for x in v))
-            return [x/m for x in v] if m > 0 else list(v)
-        def _vcross(a, b):
-            return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
-
-        def _project(p3d, origin, sight, up, dist, iw, ih):
-            """3D world point → (px, py) pixel in screenshot."""
-            s = _vnorm(sight); u = _vnorm(up); r = _vnorm(_vcross(s, u))
-            dv = [p3d[i]-origin[i] for i in range(3)]
-            xc, yc = _vdot(dv, r), _vdot(dv, u)
-            sc = min(iw, ih) / dist if dist and dist > 0 else 1.0
-            return int(round(iw/2 + xc*sc)), int(round(ih/2 - yc*sc))
-
-        # ── Project clash coords → pixel in raw screenshot ────────────────────
-        clash_px = clash_py = None
-        if coords and cam_origin:
-            try:
-                clash_px, clash_py = _project(coords, cam_origin, cam_sight,
-                                               cam_up, cam_dist, RW, RH)
-                # Clamp to image bounds
-                clash_px = max(0, min(clash_px, RW - 1))
-                clash_py = max(0, min(clash_py, RH - 1))
-                print(f"    [SVG] Clash projected to pixel ({clash_px}, {clash_py}) in {RW}×{RH}")
-            except Exception as pe:
-                print(f"    [SVG] Projection failed: {pe}")
-
-        # ── Context thumbnail — strip spec tree (left 25%) ────────────────────
-        ctx_raw = raw.crop((RW // 4, 0, RW, RH))
-        ctx_img = ctx_raw.resize((CTX_W, CTX_H), Image.Resampling.LANCZOS)
-
-        # ── Detail zoom — crop around clash pixel; fall back to centre ─────────
-        # Crop a 40% × 40% window of the raw image centred on the clash pixel.
-        # Because we crop around the clash point, the marker is ALWAYS at crop centre.
-        CROP_F = 0.40   # fraction of raw image to crop (40% × 40%)
-        hw = int(RW * CROP_F / 2)
-        hh = int(RH * CROP_F / 2)
-
-        if clash_px is not None:
-            cx, cy = clash_px, clash_py
-        else:
-            cx, cy = RW // 2, RH // 2   # centre fallback
-
-        # Clamp crop box to image boundaries
-        l = max(0, cx - hw);  r_  = min(RW, cx + hw)
-        t = max(0, cy - hh);  b   = min(RH, cy + hh)
-        # Adjust cx/cy so marker stays at crop centre after clamping
-        actual_cx = (l + r_) // 2
-        actual_cy = (t + b)  // 2
-
-        zoom_crop = raw.crop((l, t, r_, b))
-        det_img   = zoom_crop.resize((DET_W, DET_H), Image.Resampling.LANCZOS)
-
-        # ── Build canvas ──────────────────────────────────────────────────────
-        CANVAS_W = CTX_W + SEP + DET_W
-        CANVAS_H = LABEL_H + DET_H
-
-        canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), (255, 255, 255))
-        canvas.paste(ctx_img, (0, LABEL_H + (DET_H - CTX_H) // 2))
-        canvas.paste(det_img, (CTX_W + SEP, LABEL_H))
-
-        draw = ImageDraw.Draw(canvas)
-        draw.rectangle((CTX_W, 0, CTX_W + SEP, CANVAS_H), fill=(160, 175, 210))
+        CELL_W   = 640    # width of each quadrant in the final montage
+        CELL_H   = 480    # height of each quadrant
+        LABEL_H  = 36     # height of the label strip at the top of every cell
+        BORDER   = 4      # gap / border between cells
+        CANVAS_W = CELL_W  * 2 + BORDER
+        CANVAS_H = CELL_H  * 2 + BORDER
 
         # Fonts
         try:
-            f_label  = ImageFont.truetype("arialbd.ttf", 22)
-            f_marker = ImageFont.truetype("arialbd.ttf", 18)
-            f_msub   = ImageFont.truetype("arial.ttf",   14)
+            f_label = ImageFont.truetype("arialbd.ttf", 15)
         except Exception:
-            f_label = f_marker = f_msub = ImageFont.load_default()
+            f_label = ImageFont.load_default()
 
-        # ── Clash marker — always at the centre of the detail crop ────────────
-        val_mm = float(clash_result.get("clearance", 0.0))
-        ctype  = str(clash_result.get("type", "CLASH")).upper()
+        canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), (255, 255, 255))
 
-        # Marker is at the exact centre of the detail panel (= crop centre = clash point)
-        mx = CTX_W + SEP + DET_W // 2
-        my = LABEL_H + DET_H // 2
+        # Quadrant offsets: TL, TR, BL, BR
+        offsets = [
+            (0,             0),
+            (CELL_W + BORDER, 0),
+            (0,             CELL_H + BORDER),
+            (CELL_W + BORDER, CELL_H + BORDER),
+        ]
 
-        R1, R2, R3   = 14, 32, 52
-        CLR_RED      = (220, 30, 30)
-        CLR_WHITE    = (255, 255, 255)
-        CLR_ORANGE   = (255, 140, 0)
+        for idx, (view_label, bmp_path, ok) in enumerate(captured_paths):
+            off_x, off_y = offsets[idx]
 
-        draw.ellipse((mx-R3, my-R3, mx+R3, my+R3), outline=CLR_ORANGE, width=3)
-        draw.ellipse((mx-R2, my-R2, mx+R2, my+R2), outline=CLR_RED,    width=3)
-        ARM = 72
-        draw.line((mx-ARM, my, mx-R1-2, my), fill=CLR_RED, width=2)
-        draw.line((mx+R1+2, my, mx+ARM, my), fill=CLR_RED, width=2)
-        draw.line((mx, my-ARM, mx, my-R1-2), fill=CLR_RED, width=2)
-        draw.line((mx, my+R1+2, mx, my+ARM), fill=CLR_RED, width=2)
-        draw.ellipse((mx-R1, my-R1, mx+R1, my+R1), fill=CLR_RED, outline=CLR_WHITE, width=2)
+            # Load or synthesise a placeholder cell
+            CELL_BG = (255, 255, 255)   # white background
+            if ok and os.path.isfile(bmp_path):
+                try:
+                    raw = Image.open(bmp_path).convert("RGB")
+                    rw, rh = raw.size
+                    # Crop left 20 % to remove the CATIA spec tree panel.
+                    crop_l = int(rw * 0.20)
+                    raw    = raw.crop((crop_l, 0, rw, rh))
 
-        # Label box
-        lbl_x = mx + R3 + 10;  lbl_y = my - 10
-        box_w, box_h = 270, 52
-        if lbl_x + box_w > CANVAS_W:
-            lbl_x = mx - R3 - box_w - 10
-        draw.rectangle((lbl_x, lbl_y, lbl_x+box_w, lbl_y+box_h),
-                       fill=(20, 20, 30), outline=CLR_RED, width=2)
-        draw.line((mx+R1, my, lbl_x, lbl_y+box_h//2), fill=CLR_RED, width=2)
-        draw.text((lbl_x+10, lbl_y+4),  f"⚠ {ctype}",
-                  fill=(255, 90, 90),   font=f_marker)
-        draw.text((lbl_x+10, lbl_y+28), f"Penetration: {abs(val_mm):.4f} mm",
-                  fill=(255, 220, 180), font=f_msub)
+                    rw2, rh2 = raw.size
+                    # Aspect-ratio-preserving resize: scale to fit inside the
+                    # cell without stretching.
+                    scale   = min(CELL_W / rw2, CELL_H / rh2)
+                    fit_w   = int(rw2 * scale)
+                    fit_h   = int(rh2 * scale)
+                    resized = raw.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+                    cell    = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
+                    paste_x = (CELL_W - fit_w) // 2
+                    paste_y = (CELL_H - fit_h) // 2
+                    cell.paste(resized, (paste_x, paste_y))
+                except Exception as pe:
+                    print(f"    [MON] Could not load {bmp_path}: {pe}")
+                    cell = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
+            else:
+                cell = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
 
-        # ── Header bars ───────────────────────────────────────────────────────
-        draw.rectangle((0, 0, CTX_W, LABEL_H), fill=(245, 247, 252))
-        draw.rectangle((0, LABEL_H-4, CTX_W, LABEL_H), fill=(30, 80, 180))
-        draw.text((12, 10), "🔍  CONTEXT VIEW", fill=(20, 50, 130), font=f_label)
+            canvas.paste(cell, (off_x, off_y))
 
-        draw.rectangle((CTX_W+SEP, 0, CANVAS_W, LABEL_H), fill=(255, 246, 246))
-        draw.rectangle((CTX_W+SEP, LABEL_H-4, CANVAS_W, LABEL_H), fill=(190, 30, 30))
-        draw.text((CTX_W+SEP+14, 10), "🔎  ZOOMED CLASH VIEW",
-                  fill=(150, 15, 15), font=f_label)
+            # ── Semi-transparent label band ────────────────────────────────
+            try:
+                overlay  = Image.new("RGBA", (CELL_W, LABEL_H), (15, 15, 25, 195))
+                cell_r   = canvas.crop((off_x, off_y,
+                                        off_x + CELL_W, off_y + LABEL_H)).convert("RGBA")
+                merged   = Image.alpha_composite(cell_r, overlay).convert("RGB")
+                canvas.paste(merged, (off_x, off_y))
+                draw_tmp = ImageDraw.Draw(canvas)
+                draw_tmp.text((off_x + 10, off_y + 10), view_label,
+                              fill=(200, 230, 255), font=f_label)
+            except Exception as le:
+                print(f"    [MON] Label overlay failed for {view_label}: {le}")
 
-        canvas.save(out_path)
-        print(f"    [SVG] Montage saved: {out_path}")
+        # ── Save final montage ────────────────────────────────────────────────
+        canvas.save(out_path, "PNG")
+        print(f"    [MON] 4-view montage saved: {out_path}")
 
-        try:
-            if os.path.exists(path_ov): os.remove(path_ov)
-        except Exception:
-            pass
+        # ── Clean up temp BMP files ───────────────────────────────────────────
+        for _, bmp_path, _ in captured_paths:
+            try:
+                if os.path.exists(bmp_path):
+                    os.remove(bmp_path)
+            except Exception:
+                pass
 
         return out_path
 
     except Exception as e:
-        import traceback
-        print(f"    [SVG] Pillow montage failed (non-fatal): {e}")
-        traceback.print_exc()
-        return path_ov if ov_captured else _make_fallback_image(clash_result, out_path)
+        import traceback as _tb
+        print(f"    [MON] Montage assembly failed: {e}")
+        _tb.print_exc()
+        return _make_fallback_image(clash_result, out_path)
 
 
 def _make_fallback_image(clash_result, out_path):
@@ -977,7 +1032,8 @@ def _actuate_parameter(catia, active_doc, root_product,
                 print(f"  [HITL] MMC clash {idx+1}/{total} decision: {dec.upper()}")
                 reviewed.append(dict(clash_r,
                                      comment=f"HITL:{dec}",
-                                     keep=("Yes" if dec == "approve" else "No")))
+                                     keep=("Yes" if dec == "approve" else "No"),
+                                     image_path=img_path))
             # All MMC clashes reviewed — now restore visibility
             _global_unhide(catia, active_doc, root_product)
             # Merge reviewed rows back with non-clash rows
@@ -1019,7 +1075,8 @@ def _actuate_parameter(catia, active_doc, root_product,
                 print(f"  [HITL] LMC clash {idx+1}/{total} decision: {dec.upper()}")
                 reviewed.append(dict(clash_r,
                                      comment=f"HITL:{dec}",
-                                     keep=("Yes" if dec == "approve" else "No")))
+                                     keep=("Yes" if dec == "approve" else "No"),
+                                     image_path=img_path))
             # All LMC clashes reviewed — now restore visibility
             _global_unhide(catia, active_doc, root_product)
             non_clash = [r for r in lmc_results if not r.get("is_clash")]
@@ -1241,6 +1298,7 @@ def run_agent_3_actuation():
                 keep             TEXT,
                 comment          TEXT,
                 location         TEXT,
+                image_path       TEXT,
                 run_at           TEXT DEFAULT (datetime('now','localtime'))
             )
         ''')
@@ -1269,8 +1327,8 @@ def run_agent_3_actuation():
                         INSERT INTO actuation_results
                             (project_tag, assembly_name, publication_name, boundary,
                              product1, product2, type, value, status, info,
-                             keep, comment, location)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                             keep, comment, location, image_path)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         ''',
                         (
                             run_project_tag,
@@ -1286,6 +1344,7 @@ def run_agent_3_actuation():
                             r.get("keep", "Yes"),
                             r.get("comment", "Automated MMC/LMC check"),
                             r.get("location", "N/A"),
+                            r.get("image_path", None),
                         )
                     )
                     row_count += 1
@@ -1295,6 +1354,19 @@ def run_agent_3_actuation():
         print(f"\n✅ {row_count} conflict row(s) saved to actuation_results table.")
     except Exception as e:
         print(f"\n⚠  Could not save results to DB: {e}")
+
+    # ── Auto-generate HTML report ─────────────────────────────────────────────
+    try:
+        import importlib, sys as _sys
+        _rep_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "generate_report.py")
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location("generate_report", _rep_path)
+        _mod  = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.generate_html_report()
+    except Exception as _re:
+        print(f"⚠  Report generation failed (non-fatal): {_re}")
 
     print("=" * 60 + "\n")
 
