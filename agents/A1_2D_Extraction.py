@@ -482,35 +482,44 @@ Return JSON:
 def agent_1c_audit(combined_raw_text, extracted_dims):
     print("-> Agent 1C (QA Auditor) cross-checking raw text vs JSON ...")
 
-    system_prompt = """You are a QA Auditor for engineering drawing data extraction.
+    n1b = len(extracted_dims)
+
+    system_prompt = f"""You are a strict QA Auditor for engineering drawing data extraction.
 
 You receive:
-  (A) Raw text extracted from the drawing tiles -- GROUND TRUTH.
-  (B) Structured JSON from the extractor.
+  (A) Raw text extracted from drawing tiles — GROUND TRUTH.
+  (B) A structured JSON list of {n1b} dimension entries from the extractor.
+
+CRITICAL RULES — READ BEFORE DOING ANYTHING ELSE:
+  *** YOUR OUTPUT LIST MUST CONTAIN AT LEAST {n1b} ENTRIES ***
+  *** NEVER REMOVE, MERGE, DEDUPLICATE, OR DROP ANY ENTRY FROM (B) ***
+  *** NEVER SHORTEN THE LIST — ONLY ADD OR CORRECT ***
+  *** IF YOU SEE A DIMENSION IN (A) NOT IN (B) → ADD IT ***
+  *** EVERY ENTRY WITH A NON-ZERO TOLERANCE MUST BE PRESERVED ***
 
 AUDIT STEPS:
-  1. Scan the raw text for every dimension, GD&T FCF, datum, and Nx count.
-  2. For each one, check: does an equivalent entry exist in the JSON?
+  1. Output EVERY entry from (B) exactly as-is (you may fix errors but NEVER delete).
+  2. Scan raw text (A) for any dimension not already covered in (B).
      Match by nominal value + tolerance. Minor naming differences are OK.
-  3. If an annotation from raw text is NOT in the JSON -> add it:
-     set status='AUDITOR_ADDED', include a brief audit_note.
-  4. If a JSON entry is wrong (e.g. wrong tolerance sign) -> correct it:
-     set status='AUDITOR_CORRECTED'.
-  5. Do NOT remove any entries -- only add or correct.
-  6. Do NOT filter zero-tolerance items -- keep everything."""
+  3. For each gap found → append a new entry:
+       status='AUDITOR_ADDED', audit_note explains what was found.
+  4. If a (B) entry has a wrong tolerance sign or value → correct it:
+       status='AUDITOR_CORRECTED', preserve the original in audit_note.
+  5. Do NOT filter zero-tolerance items — the Python layer handles that.
+  6. Final count must be >= {n1b}. If your list is shorter, you dropped something — fix it."""
 
     prompt = f"""AGENT 1A RAW EXTRACTION TEXT (ground truth):
 {combined_raw_text}
 
-AGENT 1B STRUCTURED JSON:
+AGENT 1B STRUCTURED JSON ({n1b} entries — you must keep ALL of them):
 {json.dumps(extracted_dims, indent=2)}
 
-Audit the JSON against the raw text. Add missing items. Correct errors.
-Return the complete updated list (all original entries + additions/corrections).
+Return the complete updated list. It MUST contain all {n1b} original entries
+plus any additions. NEVER drop or merge any entry.
 
 Return JSON:
 {{
-  "dimensions": [ "...complete list..." ],
+  "dimensions": [ "...complete list of ALL entries..." ],
   "audit_summary": "what was added/corrected, or 'No gaps found'",
   "final_notes": "any important observations for the engineer"
 }}
@@ -1161,6 +1170,25 @@ def run_perception_layer(file_path):
     print("=" * 62)
     audited_json = agent_1c_audit(combined_raw_text, extracted_dims)
     audited_dims = audited_json.get('dimensions', [])
+
+    # ── Safety union merge: 1B items can NEVER be dropped by 1C ──────────────
+    # Build a lookup of what 1C returned by feature_name.
+    # Any 1B item not present in 1C's output is re-inserted (with its original
+    # data) so that GPT truncation / deduplication never silently loses dims.
+    c_names = {str(d.get('feature_name', '')).strip().lower() for d in audited_dims}
+    rescued = []
+    for d in extracted_dims:
+        fname = str(d.get('feature_name', '')).strip().lower()
+        if fname not in c_names:
+            rescued.append(dict(d, status='RESCUED_FROM_1B',
+                                audit_note='Agent 1C did not include this; re-inserted from 1B output.'))
+            c_names.add(fname)
+    if rescued:
+        print(f"  [MERGE] Agent 1C dropped {len(rescued)} item(s) — re-inserted from 1B:")
+        for r in rescued:
+            print(f"    rescued: {r.get('feature_name')}")
+        audited_dims = audited_dims + rescued
+
     added = [d for d in audited_dims if d.get('status') == 'AUDITOR_ADDED']
     fixed = [d for d in audited_dims if d.get('status') == 'AUDITOR_CORRECTED']
     print(f"Agent 1C: {len(audited_dims)} total -- {len(added)} added, {len(fixed)} corrected")

@@ -490,16 +490,12 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
                 print(f"    [CAM] Reframe failed for {label_key} (non-fatal): {rfe}")
 
             # 3. Per-view zoom factor after Reframe.
-            #    Front View: strong zoom-in so the thin bracket edge-on is visible.
-            #    Top / Bottom: slight zoom-out so the CATIA toolbar bands don't
-            #                  clip the top/bottom edges of the geometry.
-            #    Others: modest tighten to reduce black margins.
             if label_key == "FRONT VIEW":
-                ZOOM_FACTOR = 2.8
+                ZOOM_FACTOR = 2.2          # zoomed out a bit (was 2.8)
             elif label_key in ("TOP VIEW", "BOTTOM VIEW"):
-                ZOOM_FACTOR = 0.85
+                ZOOM_FACTOR = 1.1          # zoomed in a bit (was 0.85)
             else:
-                ZOOM_FACTOR = 1.2
+                ZOOM_FACTOR = 1.2          # Isometric — unchanged
             try:
                 vp.Zoom = vp.Zoom * ZOOM_FACTOR
             except Exception:
