@@ -1,0 +1,19 @@
+# Ignore Scania Data & Databases
+database/*.db
+*.db
+*.pdf
+*.CATProduct
+*.CATPart
+
+# Ignore Temporary Images
+*.png
+*.jpg
+*.bmp
+
+# Python cache & environments
+__pycache__/
+*.pyc
+venv/
+env/
+# Security (NEVER UPLOAD API KEYS)
+.env
