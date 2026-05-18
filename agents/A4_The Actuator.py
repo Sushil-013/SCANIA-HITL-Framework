@@ -9,7 +9,7 @@ import datetime
 import tempfile
 import tkinter as tk
 from tkinter import font as tkfont
-from PIL import Image, ImageDraw, ImageTk, ImageFont
+from PIL import Image, ImageDraw, ImageTk, ImageFont, ImageFilter
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
 
@@ -208,16 +208,56 @@ def _run_clash_analysis(root_product, target_part_name):
                 comment = "Automated MMC/LMC check"
 
             # ─ Location (clash point coordinates) ───────────────────
-            # Try every known V5 SPA property name for clash coordinates
-            location = "N/A"
-            for coord_attr in ("Coordinates", "Point", "ClashPoint",
-                               "Coordinate", "Location", "ClashLocation"):
+            # We store both a display string AND raw float tuple (clash_coords)
+            # so the camera can aim precisely at the clash zone.
+            # Strategy: three escalating attempts, most reliable first.
+            location     = "N/A"
+            clash_coords = None   # (x, y, z) float tuple — used for camera aim
+
+            # Force COM dispatch on the conflict object for better method access.
+            try:
+                res_d = win32com.client.Dispatch(res)
+            except Exception:
+                res_d = res
+
+            # Attempt 1: pycatia Conflict wrapper (Sajadh’s exact method — most reliable)
+            # pycatia exposes get_first_point_coordinates() / get_second_point_coordinates()
+            # which handle the COM OUT-parameter calling convention correctly.
+            try:
+                from pycatia.space_analyses_interfaces.conflict import Conflict as _CatConflict
+                _wrapped = _CatConflict(getattr(res, "com_object", res))
+                fp_raw = tuple(float(v) for v in _wrapped.get_first_point_coordinates())
+                sp_raw = tuple(float(v) for v in _wrapped.get_second_point_coordinates())
+                clash_coords = tuple((fp_raw[i] + sp_raw[i]) / 2.0 for i in range(3))
+                location = f"({clash_coords[0]:.3f}, {clash_coords[1]:.3f}, {clash_coords[2]:.3f})"
+                print(f"    [DMU] clash_coords via pycatia Conflict: {clash_coords}")
+            except Exception:
+                pass
+
+            # Attempt 2: dispatched COM attributes / method calls
+            if clash_coords is None:
                 try:
-                    coords = getattr(res, coord_attr)
-                    location = f"({float(coords[0]):.3f}, {float(coords[1]):.3f}, {float(coords[2]):.3f})"
-                    break
+                    res_d = win32com.client.Dispatch(res)
                 except Exception:
-                    continue
+                    res_d = res
+                for method_pair in (("GetFirstPoint", "GetSecondPoint"),
+                                    ("FirstPoint",    "SecondPoint"),
+                                    ("first_point",   "second_point")):
+                    try:
+                        _a = getattr(res_d, method_pair[0])
+                        _b = getattr(res_d, method_pair[1])
+                        fp_raw = tuple(float(v) for v in (_a() if callable(_a) else _a))
+                        sp_raw = tuple(float(v) for v in (_b() if callable(_b) else _b))
+                        clash_coords = tuple((fp_raw[i] + sp_raw[i]) / 2.0 for i in range(3))
+                        location = f"({clash_coords[0]:.3f}, {clash_coords[1]:.3f}, {clash_coords[2]:.3f})"
+                        print(f"    [DMU] clash_coords from {method_pair[0]}: {clash_coords}")
+                        break
+                    except Exception:
+                        continue
+
+            if clash_coords is None:
+                print(f"    [DMU] ⚠  No 3D clash coordinates for conflict {r} — "
+                      f"marker will use highlight scan.")
 
             # PASS = Clearance/Contact (dist >= 0) • FAIL = Clash (dist < 0)
             is_clash = (ctype == "Clash") or (dist < 0)
@@ -235,6 +275,7 @@ def _run_clash_analysis(root_product, target_part_name):
                 "status"        : status,
                 "comment"       : comment,
                 "location"      : location,
+                "clash_coords"  : clash_coords,   # raw (x,y,z) or None
             })
 
         except Exception as item_e:
@@ -359,18 +400,329 @@ def _global_unhide(catia, active_doc, root_product):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# VECTOR MATH HELPERS  (ported from Sajadh’s layer3_tolerance_dmu_agent.py)
+# ──────────────────────────────────────────────────────────────────────────────
+import math as _math
 
-def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
+def _vsub(a, b):  return tuple(a[i]-b[i] for i in range(3))
+def _vadd(a, b):  return tuple(a[i]+b[i] for i in range(3))
+def _vscale(v, s): return tuple(c*s for c in v)
+def _vdot(a, b):  return sum(a[i]*b[i] for i in range(3))
+def _vcross(a, b):
+    return (a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0])
+def _vnorm(v):
+    m = _math.sqrt(_vdot(v, v))
+    return tuple(c/m for c in v) if m > 1e-12 else None
+def _vrot(v, axis, deg):
+    ax = _vnorm(axis)
+    if ax is None: return v
+    r = _math.radians(deg)
+    c, s = _math.cos(r), _math.sin(r)
+    d = _vdot(ax, v)
+    return _vadd(_vadd(_vscale(v, c), _vscale(_vcross(ax, v), s)), _vscale(ax, d*(1-c)))
+
+# ──────────────────────────────────────────────────────────────────────────────
+# VIEWPOINT HELPERS  (uses pycatia ViewPoint3D — ported from Sajadh)
+# ──────────────────────────────────────────────────────────────────────────────
+def _vp_get(viewer):
+    """Return a pycatia ViewPoint3D wrapping viewer’s Viewpoint3D, or None."""
+    try:
+        from pycatia.in_interfaces.viewpoint_3d import ViewPoint3D as _VP3
+        raw = viewer.Viewpoint3D
+        return _VP3(raw)
+    except Exception:
+        return None
+
+def _vp_save(viewer):
+    """Capture full viewpoint state as a plain dict.  Returns None on failure."""
+    vp = _vp_get(viewer)
+    if vp is None:
+        return None
+    try:
+        return {
+            "origin":         tuple(vp.get_origin()),
+            "sight":          tuple(vp.get_sight_direction()),
+            "up":             tuple(vp.get_up_direction()),
+            "focus_distance": float(vp.focus_distance),
+            "projection_mode": int(vp.projection_mode),
+            "zoom":           float(getattr(vp, 'zoom',        1.0) or 1.0),
+            "field_of_view":  float(getattr(vp, 'field_of_view', 0.0) or 0.0),
+        }
+    except Exception as e:
+        print(f"    [CAM] _vp_save failed: {e}")
+        return None
+
+def _vp_restore(viewer, state):
+    """Restore viewpoint from a dict saved by _vp_save."""
+    if not state:
+        return
+    vp = _vp_get(viewer)
+    if vp is None:
+        return
+    try:
+        vp.put_origin(state["origin"])
+        vp.put_sight_direction(state["sight"])
+        vp.put_up_direction(state["up"])
+        vp.focus_distance = state["focus_distance"]
+        pm = state["projection_mode"]
+        if pm == 0:   # conic/perspective
+            try: vp.field_of_view = state["field_of_view"]
+            except Exception: pass
+        else:         # cylindric/parallel
+            try: vp.zoom = state["zoom"]
+            except Exception: pass
+    except Exception as e:
+        print(f"    [CAM] _vp_restore failed: {e}")
+
+def _project_world_to_image(world_point, view_state, image_size):
+    """
+    Project a 3D world point to 2D pixel coordinates within an image of
+    image_size=(width, height), using the camera state from _vp_save().
+    Ported verbatim from Sajadh's project_world_point_to_image().
+    Returns (px, py) floats or None on failure.
+    """
+    if world_point is None or view_state is None:
+        return None
+    width, height = image_size
+    if width <= 0 or height <= 0:
+        return None
+    sight = _vnorm(view_state.get("sight"))
+    up    = _vnorm(view_state.get("up"))
+    if sight is None or up is None:
+        return None
+    right = _vnorm(_vcross(sight, up))
+    if right is None:
+        return None
+    relative = _vsub(world_point, view_state.get("origin"))
+    x_cam = _vdot(relative, right)
+    y_cam = _vdot(relative, up)
+    z_cam = _vdot(relative, sight)
+    if z_cam <= 1e-6:
+        return None
+    aspect = float(width) / float(max(1, height))
+    pm = int(view_state.get("projection_mode", 0))
+    if pm == 0:  # conic / perspective
+        fov   = float(view_state.get("field_of_view", 0.0) or 0.0)
+        tan_v = _math.tan(_math.radians(fov))
+        tan_h = tan_v * aspect
+        if abs(tan_v) <= 1e-9 or abs(tan_h) <= 1e-9:
+            return None
+        x_norm = 0.5 + (x_cam / (z_cam * tan_h)) * 0.5
+        y_norm = 0.5 - (y_cam / (z_cam * tan_v)) * 0.5
+    else:  # cylindric / parallel / orthographic
+        zoom  = float(view_state.get("zoom", 1.0) or 1.0)
+        fd    = float(view_state.get("focus_distance", 1.0) or 1.0)
+        half_v = fd / max(zoom, 1e-9)
+        half_h = half_v * aspect
+        if half_v <= 1e-9 or half_h <= 1e-9:
+            return None
+        x_norm = 0.5 + (x_cam / half_h) * 0.5
+        y_norm = 0.5 - (y_cam / half_v) * 0.5
+    if not (_math.isfinite(x_norm) and _math.isfinite(y_norm)):
+        return None
+    return (x_norm * width, y_norm * height)
+
+
+def _vp_focus(viewer, midpoint):
+    """
+    Move the camera origin so that *midpoint* appears at the centre of the
+    screen.  Also zooms in (tightens field-of-view or increases zoom factor)
+    so the clash fills roughly half the viewport.
+    Ported from Sajadh’s focus_viewpoint_on_record().
+    """
+    if midpoint is None:
+        return False
+    vp = _vp_get(viewer)
+    if vp is None:
+        return False
+    try:
+        sight = _vnorm(tuple(vp.get_sight_direction()))
+        if sight is None:
+            return False
+        fd = float(vp.focus_distance)
+        # Origin = midpoint - sight * focus_distance  =>  midpoint is at screen centre
+        vp.put_origin(_vsub(midpoint, _vscale(sight, fd)))
+        pm = int(vp.projection_mode)
+        if pm == 0:   # conic / perspective
+            try: vp.field_of_view = max(2.0, float(vp.field_of_view) * 0.55)
+            except Exception: pass
+        else:         # cylindric / parallel
+            try:
+                z = float(vp.zoom)
+                vp.zoom = max(z * 4.0, z + 0.002)
+            except Exception: pass
+        return True
+    except Exception as e:
+        print(f"    [CAM] _vp_focus failed: {e}")
+        return False
+
+def _vp_orbit(viewer, base_state, midpoint, yaw_deg, pitch_deg):
+    """
+    Rotate the camera around *midpoint* by yaw (around up) then pitch
+    (around right), keeping midpoint at the screen centre.
+    Ported from Sajadh’s apply_view_variant().
+    Returns True on success.
+    """
+    vp = _vp_get(viewer)
+    if vp is None:
+        return False
+    try:
+        sight = _vnorm(base_state["sight"])
+        up    = _vnorm(base_state["up"])
+        if sight is None or up is None:
+            return False
+        right = _vnorm(_vcross(sight, up))
+        if yaw_deg:
+            sight = _vnorm(_vrot(sight, up,    yaw_deg)) or sight
+            right = _vnorm(_vcross(sight, up))  or right
+        if pitch_deg:
+            sight = _vnorm(_vrot(sight, right,  pitch_deg)) or sight
+            up    = _vnorm(_vrot(up,    right,  pitch_deg)) or up
+        sight = _vnorm(sight) or base_state["sight"]
+        up    = _vnorm(up)    or base_state["up"]
+        vp.put_sight_direction(sight)
+        vp.put_up_direction(up)
+        fd = base_state["focus_distance"]
+        origin = _vsub(midpoint, _vscale(sight, fd)) if midpoint is not None else base_state["origin"]
+        vp.put_origin(origin)
+        vp.focus_distance = fd
+        pm = base_state["projection_mode"]
+        if pm == 0:
+            try: vp.field_of_view = base_state["field_of_view"]
+            except Exception: pass
+        else:
+            try: vp.zoom = base_state["zoom"]
+            except Exception: pass
+        return True
+    except Exception as e:
+        print(f"    [CAM] _vp_orbit failed: {e}")
+        return False
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GEOMETRY FINDER  -- locates where the actual 3D parts are in the screenshot
+def _find_geometry_center(pil_image):
+    """
+    Find the centroid (cx, cy) of 3D geometry pixels in a CATIA screenshot.
+    1. Scan for clash-highlight colours (red/orange/yellow) first.
+    2. Fallback: centroid of all non-background, non-white pixels.
+    Background grey approx (147,147,147), tolerance 133-161.
+    Returns ((cx, cy), source) or (None, None).
+    """
+    try:
+        img = pil_image.convert("RGB")
+        w, h = img.size
+        pix  = img.load()
+        sl = int(w * 0.18); sr = w
+        st = int(h * 0.06); sb = int(h * 0.92)
+        # Pass 1: highlight colours
+        hx_sum = hy_sum = h_count = 0
+        for y in range(st, sb):
+            for x in range(sl, sr):
+                R, G, B = pix[x, y][:3]
+                is_red    = R >= 180 and G <= 90  and B <= 90  and R >= G + 60 and R >= B + 60
+                is_orange = (R >= 140 and G >= 70  and B <= 120 and R >= B + 50
+                             and not (abs(R-G) < 15 and abs(R-B) < 15))
+                is_yellow = (R >= 170 and G >= 130 and B <= 140
+                             and not (abs(R-G) < 15 and abs(R-B) < 15))
+                if is_red or is_orange or is_yellow:
+                    hx_sum += x; hy_sum += y; h_count += 1
+        if h_count >= 10:
+            cx = hx_sum // h_count; cy = hy_sum // h_count
+            print(f"    [GEO] Highlight centre ({h_count} px): ({cx},{cy}).")
+            return (cx, cy), "highlight"
+        # Pass 2: geometry centroid (non-background, non-white pixels)
+        BG_LO, BG_HI = 133, 161
+        gx_sum = gy_sum = g_count = 0
+        for y in range(st, sb, 2):
+            for x in range(sl, sr, 2):
+                R, G, B = pix[x, y][:3]
+                is_bg    = BG_LO <= R <= BG_HI and BG_LO <= G <= BG_HI and BG_LO <= B <= BG_HI
+                is_white = R >= 230 and G >= 230 and B >= 230
+                if not is_bg and not is_white:
+                    gx_sum += x; gy_sum += y; g_count += 1
+        if g_count >= 50:
+            cx = gx_sum // g_count; cy = gy_sum // g_count
+            print(f"    [GEO] Geometry centroid ({g_count} sampled px): ({cx},{cy}).")
+            return (cx, cy), "geometry"
+        print(f"    [GEO] No geometry found in {w}x{h} -- viewport-centre fallback.")
+        return None, None
+    except Exception as e:
+        print(f"    [GEO] Scanner error: {e}")
+        return None, None
+
+
+def _generate_delta_view(mmc_iso_path, lmc_iso_path, out_path, pub_name, upper_limit, lower_limit):
+    """
+    #8 MMC/LMC Delta View — side-by-side comparison of the two isometric clash
+    captures.  Saved to *out_path* so the engineer can immediately see whether
+    the clash worsens at max or min material condition.
+    """
+    try:
+        CELL_W, CELL_H = 720, 540
+        BORDER         = 6
+        canvas = Image.new("RGB", (CELL_W * 2 + BORDER, CELL_H + 80), (22, 24, 34))
+        try:
+            f_h    = ImageFont.truetype("arialbd.ttf", 16)
+            f_sub  = ImageFont.truetype("arial.ttf",   13)
+        except Exception:
+            f_h = f_sub = ImageFont.load_default()
+
+        def _paste_panel(src_path, label, x_off, limit_val):
+            try:
+                img = Image.open(src_path).convert("RGB")
+            except Exception:
+                img = Image.new("RGB", (CELL_W, CELL_H), (60, 60, 80))
+            img.thumbnail((CELL_W, CELL_H), Image.Resampling.LANCZOS)
+            panel = Image.new("RGB", (CELL_W, CELL_H), (30, 30, 44))
+            px = (CELL_W - img.width) // 2
+            py = (CELL_H - img.height) // 2
+            panel.paste(img, (px, py))
+            # Label strip at bottom of panel
+            rgba = panel.convert("RGBA")
+            ov   = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+            dr   = ImageDraw.Draw(ov)
+            dr.rounded_rectangle((10, CELL_H - 46, CELL_W - 10, CELL_H - 8),
+                                  radius=8, fill=(18, 24, 36, 210),
+                                  outline=(110, 160, 220, 200), width=2)
+            dr.text((20, CELL_H - 40), label,            fill=(235, 245, 255, 255), font=f_h)
+            dr.text((20, CELL_H - 20), f"{limit_val:.4f} mm", fill=(200, 215, 240, 200), font=f_sub)
+            panel = Image.alpha_composite(rgba, ov).convert("RGB")
+            canvas.paste(panel, (x_off, 0))
+
+        _paste_panel(mmc_iso_path, "MMC  (Maximum Material)", 0,             upper_limit)
+        _paste_panel(lmc_iso_path, "LMC  (Least Material)",   CELL_W + BORDER, lower_limit)
+
+        # Title bar at the bottom
+        draw = ImageDraw.Draw(canvas)
+        draw.rectangle((0, CELL_H, CELL_W * 2 + BORDER, CELL_H + 80), fill=(14, 16, 24))
+        draw.text((16, CELL_H + 12), f"MMC vs LMC  —  {pub_name}",
+                  fill=(200, 220, 255), font=f_h)
+        draw.text((16, CELL_H + 36),
+                  "Side-by-side isometric comparison of clash at both tolerance extremes.",
+                  fill=(130, 150, 180), font=f_sub)
+
+        canvas.save(out_path, "PNG")
+        print(f"    [DELTA] MMC/LMC delta view saved: {out_path}")
+        return out_path
+    except Exception as e:
+        print(f"    [DELTA] Delta view generation failed (non-fatal): {e}")
+        return None
+
+
+def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0, save_dir=None):
     """
     4-View 2×2 Grid Montage — Isometric / Top / Front / Side.
 
     Pipeline
     ────────
     1. Save the user's original CATIA viewpoint so it can be restored at the end.
-    2. Loop over four camera angles, each targeting the clash coordinates:
-         • Set vp.PutSightDirection / vp.PutUpDirection
-         • Set vp.PutTargetPoint (clash coords)  → tight zoom via SightDistance=150
-         • Capture a .bmp screenshot to a temp file
+    2. Loop over four canonical view angles using Sajadh's yaw/pitch orbit approach
+       (iso=32°/-24°, front=0°/0°, top=0°/-88°, right=-90°/0°) relative to the
+       model's own front orientation — NOT hardcoded world-space vectors.
+         • _vp_orbit()   → rotate to the canonical angle from the saved base state
+         • viewer.Reframe() → fit the isolated clash pair in frame
+         • _vp_focus()   → re-centre and zoom in on the clash midpoint
+         • CaptureToFile → PNG → JPEG → BMP (first that Pillow can open)
     3. Open the 4 bitmaps in Pillow, crop the left 20 % (spec tree) off every one,
        resize each to a common cell size, and stitch into a 2×2 canvas.
     4. Overlay:
@@ -381,25 +733,30 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
     6. On any fatal error fall back to _make_fallback_image().
     """
     tmp_dir  = tempfile.gettempdir()
-    out_path = os.path.join(tmp_dir, f'_catia_clash_montage_{clash_idx}.png')
+    # #6 Permanent save: write montage + individual views to save_dir when provided.
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        out_path = os.path.join(save_dir, f'clash_{clash_idx:03d}_montage.png')
+    else:
+        out_path = os.path.join(tmp_dir, f'_catia_clash_montage_{clash_idx}.png')
 
-    # Four camera angles: (label, sight_direction, up_direction)
-    VIEWS = [
-        ("ISOMETRIC VIEW", [-1.0, -1.0, -1.0], [0.0,  0.0, 1.0]),
-        ("TOP VIEW",       [ 0.0,  0.0, -1.0], [0.0,  1.0, 0.0]),
-        ("FRONT VIEW",     [ 0.0,  1.0,  0.0], [0.0,  0.0, 1.0]),
-        ("BOTTOM VIEW",    [ 0.0,  0.0,  1.0], [0.0, -1.0, 0.0]),
+    # Four canonical views — (slug, yaw_deg, pitch_deg).
+    # Yaw / pitch are relative to the model's own front orientation, exactly
+    # as Sajadh does in layer3_tolerance_dmu_agent.py VIEW_SPECS.
+    # The base_state is captured via _vp_save() after the first Reframe(); each
+    # view is then produced by _vp_orbit(viewer, base_state, midpoint, yaw, pitch).
+    VIEW_SPECS = [
+        ("iso",   "ISOMETRIC VIEW",  32.0, -24.0),
+        ("front", "FRONT VIEW",       0.0,   0.0),
+        ("top",   "TOP VIEW",         0.0, -88.0),
+        ("right", "RIGHT VIEW",     -90.0,   0.0),
     ]
-
-    # ── Convenience: normalise a 3-vector ─────────────────────────────────────
-    import math as _math
-    def _vnorm(v):
-        m = _math.sqrt(sum(x * x for x in v))
-        return [x / m for x in v] if m > 0 else list(v)
 
     # ── Access viewer ─────────────────────────────────────────────────────────
     try:
-        viewer = catia.ActiveWindow.ActiveViewer
+        import win32com.client.dynamic as _windyn
+        _raw_viewer = catia.ActiveWindow.ActiveViewer
+        viewer      = _windyn.DumbDispatch(_raw_viewer)
     except Exception as e:
         print(f"    [CAM] Cannot access viewer: {e}")
         return _make_fallback_image(clash_result, out_path)
@@ -408,21 +765,7 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
     sp     = clash_result.get("second_product")
     coords = _parse_location(clash_result.get("location", "N/A"))
 
-    # ── Save original viewpoint ───────────────────────────────────────────────
-    saved_origin = saved_sight = saved_up = saved_sight_dist = None
-    try:
-        vp               = viewer.Viewpoint3D
-        saved_origin     = list(vp.GetOrigin())
-        saved_sight      = list(vp.GetSightDirection())
-        saved_up         = list(vp.GetUpDirection())
-        saved_sight_dist = float(vp.SightDistance)
-        print("    [CAM] Original viewpoint saved.")
-    except Exception as e:
-        print(f"    [CAM] Could not save original viewpoint (non-fatal): {e}")
-
     # ── Set CATIA viewer background to white before captures ─────────────────
-    # This is the only reliable way to get a white background — pixel-swapping
-    # post-processing corrupts anti-aliased geometry edges.
     saved_bg_color = None
     try:
         saved_bg_color = viewer.BackgroundColor
@@ -439,9 +782,23 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
     except Exception as e:
         print(f"    [CAM] _isolate_pair failed (non-fatal): {e}")
 
-    # Force CATIA to recalculate the bounding box BEFORE touching the camera.
-    # Without this, the viewer is 'confused' after isolating parts and the
-    # Viewpoint3D properties (SightDistance, Origin, etc.) raise COM errors.
+    # ── Step 1: Add fp/sp to CATIA Selection before Reframe ─────────────────
+    # Sajadh does this in capture_conflict_views() — select_products_for_capture()
+    # adds the two products to Selection so that viewer.Reframe() fits exactly
+    # those two objects (tight bounding box), not the whole assembly.
+    try:
+        sel = active_doc.Selection
+        sel.Clear()
+        if fp is not None:
+            try: sel.Add(fp)
+            except Exception: pass
+        if sp is not None:
+            try: sel.Add(sp)
+            except Exception: pass
+    except Exception:
+        pass
+
+    # ── Step 2: Reframe to fit the isolated pair ──────────────────────────────
     try:
         viewer.Reframe()
         viewer.Update()
@@ -450,104 +807,119 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
     except Exception as e:
         print(f"    [CAM] Reframe after isolate failed (non-fatal): {e}")
 
-    # ── Helper: capture one screenshot ───────────────────────────────────────
-    def _take_bmp(label_key, idx):
-        """Set camera and capture a screenshot; return (path, success).
+    # ── Step 3: Zoom in tight on the clash midpoint ───────────────────────────
+    # This is Sajadh's focus_viewpoint_on_record() — slides origin to midpoint
+    # AND tightens field-of-view (*0.55) or zoom (*4.0) so the clash fills the
+    # screen.  We do this BEFORE saving base_state so that every orbit view
+    # inherits the tight zoom level.
+    clash_coords = clash_result.get("clash_coords")
+    midpoint     = tuple(clash_coords) if clash_coords else None
+    if midpoint is not None:
+        if _vp_focus(viewer, midpoint):
+            print(f"    [CAM] Tight zoom on clash midpoint {midpoint}: OK.")
+            viewer.Update()
+            time.sleep(0.15)
+        else:
+            print("    [CAM] _vp_focus failed (non-fatal) — base state will be at Reframe zoom.")
 
-        CATIA's CaptureToFile format reliability varies by installation and
-        projection mode.  We try three formats in order of Pillow
-        compatibility — PNG (3) → JPEG (1) → BMP (0) — and return the first
-        file that Pillow can actually open.  This prevents the
-        'cannot identify image file' error caused by CATIA writing an
-        incomplete or proprietary BMP when fmt=0 is used directly.
+    # ── Step 4: Save base viewpoint from the TIGHT focused position ───────────
+    # Sajadh saves base_record_view_state AFTER focus_viewpoint_on_record().
+    # All four orbit views inherit this tight zoom, so every captured image
+    # shows the clash region filling the frame — not a distant overview.
+    base_state = _vp_save(viewer)
+    if base_state:
+        print("    [CAM] Base viewpoint (tight on clash) saved via _vp_save().")
+    else:
+        print("    [CAM] Could not save base viewpoint (non-fatal).")
+
+    # ── Helper: orbit to one view and capture a screenshot ───────────────────
+    def _take_bmp(slug, view_label, yaw_deg, pitch_deg, idx):
+        """Orbit from the already-tight base_state (Sajadh's exact technique).
+
+        No per-view Reframe or focus needed — base_state is already centred and
+        zoomed in on the clash.  Just orbit to the desired angle and capture.
         """
-        view_label, sight, up = None, None, None
-        for vl, s, u in VIEWS:
-            if vl == label_key:
-                view_label, sight, up = vl, s, u
-                break
-
-        slug = label_key.split()[0].lower()
-        # Candidate (format_id, extension) pairs — most reliable first.
         FORMAT_ATTEMPTS = [(3, '.png'), (1, '.jpg'), (0, '.bmp')]
 
         try:
-            vp = viewer.Viewpoint3D
-
-            # 1. Set the desired view angle.
-            vp.PutSightDirection(_vnorm(sight))
-            vp.PutUpDirection(_vnorm(up))
-
-            # 2. Plain Reframe — no selection needed.
-            #    _isolate_pair() already hid every part except fp and sp, so
-            #    viewer.Reframe() fits exactly those two visible objects.
-            #    Using sel.Add() here was causing silent failures (wrong COM
-            #    reference type for the bracket product), making Reframe fit
-            #    only the screw and leaving the bracket out of frame.
-            try:
-                viewer.Reframe()
-            except Exception as rfe:
-                print(f"    [CAM] Reframe failed for {label_key} (non-fatal): {rfe}")
-
-            # 3. Per-view zoom factor after Reframe.
-            if label_key == "FRONT VIEW":
-                ZOOM_FACTOR = 2.2          # zoomed out a bit (was 2.8)
-            elif label_key in ("TOP VIEW", "BOTTOM VIEW"):
-                ZOOM_FACTOR = 1.1          # zoomed in a bit (was 0.85)
+            # Orbit camera to the desired yaw/pitch angle from the tight base.
+            # apply_view_variant / _vp_orbit keeps midpoint at screen centre
+            # throughout the rotation — every view stays locked on the clash.
+            if base_state is not None:
+                ok = _vp_orbit(viewer, base_state, midpoint, yaw_deg, pitch_deg)
+                if not ok:
+                    print(f"    [CAM] _vp_orbit failed for {view_label} (non-fatal).")
             else:
-                ZOOM_FACTOR = 1.2          # Isometric — unchanged
-            try:
-                vp.Zoom = vp.Zoom * ZOOM_FACTOR
-            except Exception:
-                pass
+                print(f"    [CAM] No base_state — skipping orbit for {view_label}.")
+
+            # #7 Context zoom: iso stays tight (100%); other views back off slightly
+            # so the engineer can see WHERE on the part the clash zone sits, not
+            # just the sub-mm contact spot.  We widen the field-of-view / reduce
+            # zoom by 35% for the three orthographic views after the orbit.
+            if view_label != "ISOMETRIC VIEW" and midpoint is not None:
+                vp_ctx = _vp_get(viewer)
+                if vp_ctx is not None:
+                    try:
+                        pm = int(vp_ctx.projection_mode)
+                        if pm == 0:   # conic/perspective
+                            vp_ctx.field_of_view = min(60.0, float(vp_ctx.field_of_view) / 0.65)
+                        else:         # cylindric/parallel
+                            vp_ctx.zoom = max(0.0001, float(vp_ctx.zoom) * 0.65)
+                    except Exception:
+                        pass
 
             viewer.Update()
             time.sleep(0.5)
 
-            # Try each format until Pillow can open the result.
+            # Capture the viewpoint state at this exact camera position so the
+            # montage builder can project the 3D clash point to 2D pixels.
+            capture_view_state = _vp_save(viewer)
+
+            # Capture — try PNG → JPEG → BMP until Pillow can open the result.
             for fmt_id, ext in FORMAT_ATTEMPTS:
                 cap_path = os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}{ext}')
                 try:
                     viewer.CaptureToFile(fmt_id, cap_path)
-                    time.sleep(0.8)   # give CATIA time to flush the file
+                    time.sleep(0.8)
                     if os.path.isfile(cap_path) and os.path.getsize(cap_path) > 2000:
-                        # Verify Pillow can actually decode it before accepting.
                         from PIL import Image as _PIL_Image
                         try:
                             with _PIL_Image.open(cap_path) as _probe:
-                                _probe.verify()   # raises if corrupt / unknown
-                            print(f"    [CAM] Captured {label_key} (fmt={fmt_id}): {cap_path}")
-                            return cap_path, True
+                                _probe.verify()
+                            print(f"    [CAM] Captured {view_label} (fmt={fmt_id}): {cap_path}")
+                            return cap_path, True, capture_view_state
                         except Exception:
-                            pass   # this format unreadable — try next
+                            pass
                 except Exception:
                     pass
 
-            print(f"    [CAM] All format attempts failed for {label_key}.")
-            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False
+            print(f"    [CAM] All format attempts failed for {view_label}.")
+            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False, capture_view_state
 
         except Exception as e:
-            print(f"    [CAM] Capture failed for {label_key}: {e}")
-            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False
+            print(f"    [CAM] Capture failed for {view_label}: {e}")
+            return os.path.join(tmp_dir, f'_catia_v4_{slug}_{idx}.bmp'), False, None
 
     # ── Shoot all 4 views ─────────────────────────────────────────────────────
-    captured_paths = []   # list of (label, path, ok)
-    for view_label, sight, up in VIEWS:
-        path, ok = _take_bmp(view_label, clash_idx)
-        captured_paths.append((view_label, path, ok))
+    captured_paths = []   # list of (view_label, path, ok, view_state)
+    for slug, view_label, yaw_deg, pitch_deg in VIEW_SPECS:
+        path, ok, view_state = _take_bmp(slug, view_label, yaw_deg, pitch_deg, clash_idx)
+        captured_paths.append((view_label, path, ok, view_state))
 
-    # ── Restore original viewpoint ────────────────────────────────────────────
-    if saved_origin is not None:
+    # Clear CATIA selection (was set to fp/sp before Reframe).
+    try:
+        active_doc.Selection.Clear()
+    except Exception:
+        pass
+
+    # ── Restore original viewpoint via _vp_restore() ─────────────────────────
+    if base_state is not None:
+        _vp_restore(viewer, base_state)
         try:
-            vp = viewer.Viewpoint3D
-            vp.PutOrigin(saved_origin)
-            vp.PutSightDirection(saved_sight)
-            vp.PutUpDirection(saved_up)
-            vp.SightDistance = saved_sight_dist
             viewer.Update()
-            print("    [CAM] Original viewpoint restored.")
-        except Exception as e:
-            print(f"    [CAM] Could not restore viewpoint (non-fatal): {e}")
+        except Exception:
+            pass
+        print("    [CAM] Original viewpoint restored via _vp_restore().")
 
     # ── Restore original background color ─────────────────────────────────────
     if saved_bg_color is not None:
@@ -558,87 +930,198 @@ def _capture_and_annotate_clash(catia, active_doc, clash_result, clash_idx=0):
             pass
 
     # ── Check we have at least one usable capture ─────────────────────────────
-    any_ok = any(ok for _, _, ok in captured_paths)
+    any_ok = any(ok for _, _, ok, _ in captured_paths)
     if not any_ok:
         print("    [CAM] All 4 captures failed — generating fallback image.")
         return _make_fallback_image(clash_result, out_path)
 
-    # ── Pillow: build 2×2 montage ─────────────────────────────────────────────
+    # ── Pillow: smart crop + annotate + assemble 2×2 montage ─────────────────
     try:
         CELL_W   = 640    # width of each quadrant in the final montage
         CELL_H   = 480    # height of each quadrant
-        LABEL_H  = 36     # height of the label strip at the top of every cell
-        BORDER   = 4      # gap / border between cells
-        CANVAS_W = CELL_W  * 2 + BORDER
-        CANVAS_H = CELL_H  * 2 + BORDER
+        BORDER   = 4      # gap between cells
+        CANVAS_W = CELL_W * 2 + BORDER
+        CANVAS_H = CELL_H * 2 + BORDER
 
-        # Fonts
         try:
             f_label = ImageFont.truetype("arialbd.ttf", 15)
+            f_info  = ImageFont.truetype("arial.ttf",   13)
+            f_small = ImageFont.truetype("arial.ttf",   11)
         except Exception:
-            f_label = ImageFont.load_default()
+            f_label = f_info = f_small = ImageFont.load_default()
 
-        canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), (255, 255, 255))
+        ctype   = clash_result.get("type", "Clash")
+        dist    = clash_result.get("clearance", 0.0)
+        p1_name = clash_result.get("p1_name", "?")
+        p2_name = clash_result.get("p2_name", "?")
+        marker_color_rgb = (220, 50, 47) if ctype == "Clash" else (203, 75, 22) if ctype == "Contact" else (38, 139, 210)
 
-        # Quadrant offsets: TL, TR, BL, BR
+        VIEW_DISPLAY = {
+            "ISOMETRIC VIEW": "View 1 – Isometric",
+            "FRONT VIEW":     "View 2 – Front",
+            "TOP VIEW":       "View 3 – Top",
+            "RIGHT VIEW":     "View 4 – Right",
+        }
+
+        canvas = Image.new("RGB", (CANVAS_W, CANVAS_H), (30, 30, 40))
+
         offsets = [
-            (0,             0),
+            (0,               0),
             (CELL_W + BORDER, 0),
-            (0,             CELL_H + BORDER),
+            (0,               CELL_H + BORDER),
             (CELL_W + BORDER, CELL_H + BORDER),
         ]
 
-        for idx, (view_label, bmp_path, ok) in enumerate(captured_paths):
-            off_x, off_y = offsets[idx]
+        def _smart_crop(img):
+            """
+            Strip CATIA UI chrome to extract the pure 3D viewport region.
+            CaptureToFile captures the whole CATIA window:
+              - Spec-tree panel: left ~18% of width
+              - Top toolbar:     top  ~6% of height
+              - Bottom toolbar:  bottom ~8% of height
+            The 3D viewport occupies the remaining area.  Its centre is
+            where _vp_focus() aimed the camera = the clash midpoint.
 
-            # Load or synthesise a placeholder cell
-            CELL_BG = (255, 255, 255)   # white background
+            Returns (cropped_image, (left, top, right, bottom)).
+            """
+            w, h = img.size
+            left   = int(w * 0.18)
+            top    = int(h * 0.06)
+            right  = w
+            bottom = int(h * 0.92)
+            cropped = img.crop((left, top, right, bottom))
+            cw, ch = cropped.size
+            if cw > 1200 or ch > 900:
+                cropped.thumbnail((1200, 900), Image.Resampling.LANCZOS)
+            return cropped, (left, top, right, bottom)
+
+        def _annotate_cell(cell_img, view_label, marker_pos, show_clash_info=True):
+            """Overlay Sajadh-style badges on a CELL image (RGBA compositing).
+            • Top-left rounded-rectangle: view name
+            • Top-left below: clash type + dist + part names info box
+            • At marker_pos: ring circle + callout line to badge
+            """
+            img_rgba  = cell_img.convert("RGBA")
+            overlay   = Image.new("RGBA", img_rgba.size, (0, 0, 0, 0))
+            draw      = ImageDraw.Draw(overlay)
+            mc        = marker_color_rgb + (255,)   # fully opaque tuple
+            mc_fill   = marker_color_rgb + (230,)
+
+            # View name badge (top-left)
+            display_name = VIEW_DISPLAY.get(view_label, view_label)
+            vbox = (12, 12, 230, 48)
+            draw.rounded_rectangle(vbox, radius=8, fill=(18, 24, 36, 215), outline=(110, 160, 220, 255), width=2)
+            draw.text((vbox[0] + 10, vbox[1] + 8), display_name, fill=(235, 245, 255, 255), font=f_label)
+
+            # Clash info box (below view badge) — isometric only
+            if show_clash_info:
+                ibox = (12, 58, 380, 116)
+                draw.rounded_rectangle(ibox, radius=8, fill=(18, 24, 36, 210), outline=mc_fill, width=2)
+                draw.text((ibox[0] + 10, ibox[1] + 8),  f"{ctype.upper()}  {dist:+.4f} mm",
+                          fill=(255, 245, 210, 255), font=f_info)
+                label_pair = f"{p1_name[:22]}  ↔  {p2_name[:22]}"
+                draw.text((ibox[0] + 10, ibox[1] + 30), label_pair, fill=(210, 220, 235, 255), font=f_small)
+
+            # Clash zone ring + callout
+            if marker_pos is not None:
+                cx, cy = int(marker_pos[0]), int(marker_pos[1])
+                r = max(18, min(40, int(min(cell_img.width, cell_img.height) * 0.05)))
+                draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=mc_fill, width=5)
+                # Callout box
+                cb_w, cb_h = 200, 40
+                if cx < cell_img.width * 0.58:
+                    cb_left = min(cell_img.width - cb_w - 12, cx + r + 14)
+                    anchor_x = cb_left
+                else:
+                    cb_left = max(12, cx - cb_w - r - 14)
+                    anchor_x = cb_left + cb_w
+                cb_top = max(124, min(cell_img.height - cb_h - 12, cy - cb_h // 2))
+                cb_box = (cb_left, cb_top, cb_left + cb_w, cb_top + cb_h)
+                draw.rounded_rectangle(cb_box, radius=8, fill=(18, 24, 36, 210), outline=mc_fill, width=2)
+                draw.text((cb_box[0] + 10, cb_box[1] + 12),
+                          f"{ctype.capitalize()} area", fill=(255, 245, 210, 255), font=f_small)
+                draw.line((cx, cy, anchor_x, cb_top + cb_h // 2), fill=mc_fill, width=3)
+
+            composed = Image.alpha_composite(img_rgba, overlay).convert("RGB")
+            return composed
+
+        for idx, (view_label, bmp_path, ok, cap_view_state) in enumerate(captured_paths):
+            off_x, off_y = offsets[idx]
+            CELL_BG = (40, 40, 55)
+
+            marker_pos = None
             if ok and os.path.isfile(bmp_path):
                 try:
                     raw = Image.open(bmp_path).convert("RGB")
-                    rw, rh = raw.size
-                    # Crop left 20 % to remove the CATIA spec tree panel.
-                    crop_l = int(rw * 0.20)
-                    raw    = raw.crop((crop_l, 0, rw, rh))
+                    # #2 UnsharpMask: crisp up geometry edges (Sajadh's technique).
+                    raw = raw.filter(ImageFilter.UnsharpMask(radius=1.8, percent=140, threshold=2))
+                    raw_w, raw_h = raw.size
 
-                    rw2, rh2 = raw.size
-                    # Aspect-ratio-preserving resize: scale to fit inside the
-                    # cell without stretching.
-                    scale   = min(CELL_W / rw2, CELL_H / rh2)
-                    fit_w   = int(rw2 * scale)
-                    fit_h   = int(rh2 * scale)
-                    resized = raw.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
+                    # Smart crop: returns (cropped_image, (left, top, right, bottom)).
+                    cropped, (crop_left, crop_top, crop_right, crop_bottom) = _smart_crop(raw)
+                    cw, ch = cropped.size
+
+                    # Scale cropped image to fit inside the cell.
+                    scale   = min(CELL_W / max(1, cw), CELL_H / max(1, ch))
+                    fit_w   = max(1, int(cw * scale))
+                    fit_h   = max(1, int(ch * scale))
+                    resized = cropped.resize((fit_w, fit_h), Image.Resampling.LANCZOS)
                     cell    = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
                     paste_x = (CELL_W - fit_w) // 2
                     paste_y = (CELL_H - fit_h) // 2
                     cell.paste(resized, (paste_x, paste_y))
+
+                    # ── Marker position (Sajadh's exact approach) ────────────
+                    # Project the 3D clash midpoint to raw image pixel coords,
+                    # then transform into the cropped+scaled cell space.
+                    orig_cw = crop_right  - crop_left
+                    orig_ch = crop_bottom - crop_top
+                    thumb_scale_x = cw / max(1, orig_cw)
+                    thumb_scale_y = ch / max(1, orig_ch)
+                    proj = _project_world_to_image(midpoint, cap_view_state, (raw_w, raw_h))
+                    if proj is not None:
+                        px, py = proj
+                        local_x = px - crop_left
+                        local_y = py - crop_top
+                        if 0 <= local_x <= orig_cw and 0 <= local_y <= orig_ch:
+                            cell_x = paste_x + int(local_x * thumb_scale_x * scale)
+                            cell_y = paste_y + int(local_y * thumb_scale_y * scale)
+                            cell_x = max(0, min(CELL_W - 1, cell_x))
+                            cell_y = max(0, min(CELL_H - 1, cell_y))
+                            marker_pos = (cell_x, cell_y)
+                            print(f"    [MON] Marker at ({cell_x},{cell_y}) proj=({int(px)},{int(py)}) for {view_label}.")
+                        else:
+                            print(f"    [MON] Projected point ({int(px)},{int(py)}) outside crop for {view_label} — no marker.")
+                    else:
+                        print(f"    [MON] Projection failed for {view_label} — no marker.")
+
+                    # Annotate this cell — clash info badge only on isometric (idx 0).
+                    cell = _annotate_cell(cell, view_label, marker_pos, show_clash_info=(idx == 0))
+                    print(f"    [MON] Annotated {view_label}.")
+
+                    # #6 Save individual annotated view to permanent directory.
+                    if save_dir:
+                        slug_map = {"ISOMETRIC VIEW": "iso", "FRONT VIEW": "front",
+                                    "TOP VIEW": "top", "RIGHT VIEW": "right"}
+                        view_slug = slug_map.get(view_label, f"view{idx}")
+                        ind_path = os.path.join(save_dir, f'clash_{clash_idx:03d}_{view_slug}.png')
+                        cell.save(ind_path, "PNG")
+                        print(f"    [MON] Saved {view_label} → {ind_path}")
+
                 except Exception as pe:
-                    print(f"    [MON] Could not load {bmp_path}: {pe}")
+                    print(f"    [MON] Could not process {bmp_path}: {pe}")
                     cell = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
             else:
                 cell = Image.new("RGB", (CELL_W, CELL_H), CELL_BG)
 
             canvas.paste(cell, (off_x, off_y))
 
-            # ── Semi-transparent label band ────────────────────────────────
-            try:
-                overlay  = Image.new("RGBA", (CELL_W, LABEL_H), (15, 15, 25, 195))
-                cell_r   = canvas.crop((off_x, off_y,
-                                        off_x + CELL_W, off_y + LABEL_H)).convert("RGBA")
-                merged   = Image.alpha_composite(cell_r, overlay).convert("RGB")
-                canvas.paste(merged, (off_x, off_y))
-                draw_tmp = ImageDraw.Draw(canvas)
-                draw_tmp.text((off_x + 10, off_y + 10), view_label,
-                              fill=(200, 230, 255), font=f_label)
-            except Exception as le:
-                print(f"    [MON] Label overlay failed for {view_label}: {le}")
-
         # ── Save final montage ────────────────────────────────────────────────
         canvas.save(out_path, "PNG")
         print(f"    [MON] 4-view montage saved: {out_path}")
 
         # ── Clean up temp BMP files ───────────────────────────────────────────
-        for _, bmp_path, _ in captured_paths:
+        for _, bmp_path, _, _ in captured_paths:
             try:
                 if os.path.exists(bmp_path):
                     os.remove(bmp_path)
@@ -750,20 +1233,31 @@ def _build_hitl_content(container, decision, on_decide, image_path,
     # ── DECISION BUTTONS — packed BEFORE content (side="bottom") ─────────
     tk.Frame(container, bg=SEP, height=1).pack(fill="x", side="bottom")
 
-    btn_bar = tk.Frame(container, bg=BG_ROOT, pady=12)
+    btn_bar = tk.Frame(container, bg=BG_ROOT, pady=8)
     btn_bar.pack(fill="x", side="bottom", padx=16)
+
+    # #4 Notes field — engineer can annotate the decision with a free-text note.
+    notes_var = tk.StringVar()
+    notes_row = tk.Frame(container, bg=BG_ROOT)
+    notes_row.pack(fill="x", side="bottom", padx=16, pady=(0, 4))
+    tk.Label(notes_row, text="Engineer note (optional):",
+             bg=BG_ROOT, fg=FG_MUTED, font=f_sm, anchor="w").pack(side="left", padx=(0, 8))
+    tk.Entry(notes_row, textvariable=notes_var, font=f_body,
+             bg="#ffffff", fg=FG_DARK, relief="solid", bd=1,
+             width=55).pack(side="left", fill="x", expand=True)
 
     def _decide(val):
         decision["value"] = val
+        decision["note"]  = notes_var.get().strip()
         on_decide()
 
     btn_defs = [
         ("✔  Approve Clash",            "approve",  "#1e8449", FG_WHITE,
-         "Interference is genuine and expected."),
+         "Interference is genuine and expected.  [Enter]"),
         ("✖  Reject  (False Positive)",  "reject",   "#c0392b", FG_WHITE,
-         "Mark as false positive — no real interference."),
+         "Mark as false positive — no real interference.  [Esc]"),
         ("▲  Override",                  "override", "#d68910", FG_WHITE,
-         "Accept with reservation — flag for review."),
+         "Accept with reservation — flag for review.  [Space]"),
     ]
     for txt, val, bg, fg, tip in btn_defs:
         col = tk.Frame(btn_bar, bg=BG_ROOT)
@@ -778,6 +1272,17 @@ def _build_hitl_content(container, decision, on_decide, image_path,
         ).pack(fill="x")
         tk.Label(col, text=tip, bg=BG_ROOT, fg=FG_MUTED,
                  font=f_sm, anchor="center").pack()
+
+    # #5 Keyboard shortcuts — bind after all buttons exist so focus is clear.
+    def _bind_keys(widget):
+        widget.bind("<Return>",  lambda _e: _decide("approve"),  add="+")
+        widget.bind("<Escape>",  lambda _e: _decide("reject"),   add="+")
+        widget.bind("<space>",   lambda _e: _decide("override"), add="+")
+    try:
+        root_win = container.winfo_toplevel()
+        _bind_keys(root_win)
+    except Exception:
+        _bind_keys(container)
 
     # ── MAIN CONTENT ROW — packed LAST so it fills remaining space ────────
     content = tk.Frame(container, bg=BG_ROOT)
@@ -795,6 +1300,16 @@ def _build_hitl_content(container, decision, on_decide, image_path,
 
     r = clash_result
     val_mm = float(r.get("clearance", 0.0))
+
+    # #9 Severity colour coding: scale the depth badge colour by magnitude so
+    # engineers get an instant triage signal before reading the number.
+    abs_mm = abs(val_mm)
+    if abs_mm < 0.05:
+        depth_color = "#e67e22"   # orange — very light interference
+    elif abs_mm < 0.5:
+        depth_color = "#e84040"   # standard red
+    else:
+        depth_color = "#8b0000"   # dark/deep red — significant penetration
 
     def _row(label, value, vc=FG_DARK):
         row = tk.Frame(right, bg=BG_CARD)
@@ -814,7 +1329,7 @@ def _build_hitl_content(container, decision, on_decide, image_path,
              bg=BG_CARD, fg=FG_MUTED, font=f_sm, anchor="w").pack(anchor="w")
     depth_str = f"{val_mm:.4f} mm"
     tk.Label(df, text=depth_str,
-             bg=BG_CARD, fg=ACCENT, font=f_val, anchor="w").pack(anchor="w")
+             bg=BG_CARD, fg=depth_color, font=f_val, anchor="w").pack(anchor="w")
 
     _hsep()
     _row("Type",    r.get("type",    "?").upper())
@@ -871,6 +1386,47 @@ def _build_hitl_content(container, decision, on_decide, image_path,
 
     left.bind("<Configure>", _render)
 
+    # #3 Click-to-zoom: clicking the image opens it full-resolution in a scrollable Toplevel.
+    def _open_zoom(_event=None):
+        if _pil[0] is None:
+            return
+        zoom_win = tk.Toplevel(container.winfo_toplevel())
+        zoom_win.title(f"Full View — {pub_name}  [{boundary}]  Conflict {clash_idx + 1}")
+        zoom_win.geometry("1320x900")
+        zoom_win.minsize(600, 400)
+        _zf = tk.Frame(zoom_win, bg="#1d2030")
+        _zf.pack(fill="both", expand=True)
+        _zf.columnconfigure(0, weight=1)
+        _zf.rowconfigure(0, weight=1)
+        _zcanvas = tk.Canvas(_zf, bg="#1d2030", highlightthickness=0)
+        _zcanvas.grid(row=0, column=0, sticky="nsew")
+        _ys = tk.Scrollbar(_zf, orient="vertical",   command=_zcanvas.yview)
+        _xs = tk.Scrollbar(_zf, orient="horizontal", command=_zcanvas.xview)
+        _ys.grid(row=0, column=1, sticky="ns")
+        _xs.grid(row=1, column=0, sticky="ew")
+        _zcanvas.configure(yscrollcommand=_ys.set, xscrollcommand=_xs.set)
+        _zref = [None]
+        _zscale = [1.0]
+        def _zrender():
+            w = max(1, int(_pil[0].width  * _zscale[0]))
+            h = max(1, int(_pil[0].height * _zscale[0]))
+            _zref[0] = ImageTk.PhotoImage(_pil[0].resize((w, h), Image.Resampling.LANCZOS))
+            _zcanvas.delete("all")
+            _zcanvas.create_image(0, 0, image=_zref[0], anchor="nw")
+            _zcanvas.configure(scrollregion=(0, 0, w, h))
+        def _zwheel(e):
+            _zscale[0] = max(0.1, min(8.0, _zscale[0] * (1.1 if e.delta > 0 else 0.9)))
+            _zrender()
+        _zcanvas.bind("<MouseWheel>", _zwheel)
+        tk.Label(zoom_win, text="Scroll to zoom  •  Double-click to fit",
+                 bg="#1d2030", fg="#6c8ebf", font=f_sm).pack(side="bottom")
+        zoom_win.after(50, _zrender)
+
+    img_lbl.bind("<Button-1>", _open_zoom)
+    img_lbl.config(cursor="hand2")
+    tk.Label(left, text="Click image to zoom  •  Live CATIA model on other monitor",
+             bg=BG_IMG, fg="#9aadca", font=f_sm).pack(side="bottom", pady=(0, 4))
+
 
 def _show_hitl_ui(image_path, clash_result, pub_name, boundary, clash_idx, total_clashes):
     """
@@ -878,10 +1434,10 @@ def _show_hitl_ui(image_path, clash_result, pub_name, boundary, clash_idx, total
     • If _HITL_FRAME is set (injected by master_app), builds UI inside that frame
       and blocks the calling thread via threading.Event until a decision is made.
     • Otherwise falls back to a standalone tk.Tk() window.
-    Returns 'approve' | 'reject' | 'override'.
+    Returns (decision_str, note_str) where decision_str is 'approve' | 'reject' | 'override'.
     """
     import threading as _threading
-    decision = {"value": "approve"}
+    decision = {"value": "approve", "note": ""}
 
     if _HITL_FRAME is not None:
         # ── Embedded mode ─────────────────────────────────────────────────
@@ -900,7 +1456,7 @@ def _show_hitl_ui(image_path, clash_result, pub_name, boundary, clash_idx, total
         _done.wait()
         # Clear the frame so it is blank for the next clash (or when done)
         _HITL_FRAME.after(0, lambda: [w.destroy() for w in _HITL_FRAME.winfo_children()])
-        return decision["value"]
+        return decision["value"], decision["note"]
 
     else:
         # ── Standalone window mode ────────────────────────────────────────
@@ -925,7 +1481,7 @@ def _show_hitl_ui(image_path, clash_result, pub_name, boundary, clash_idx, total
         root.lift()
         root.focus_force()
         root.mainloop()
-        return decision["value"]
+        return decision["value"], decision["note"]
 
 
 def _summarise_clash_results(clash_results, boundary_label):
@@ -973,6 +1529,17 @@ def _actuate_parameter(catia, active_doc, root_product,
     parts = part_path.strip().split('.')
     target_part_name = '.'.join(parts[-2:]) if len(parts) >= 2 else part_path
     print(f"  Target part filter: '{target_part_name}'")
+
+    # #6 Permanent save directory — Results/dmu_agent/{pub_name}/
+    _safe_name = re.sub(r'[^\w\-]', '_', pub_name)
+    save_base  = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              'Results', 'dmu_agent', _safe_name)
+    mmc_save_dir = os.path.join(save_base, 'MMC')
+    lmc_save_dir = os.path.join(save_base, 'LMC')
+
+    # #8 Track first iso path from each boundary for delta view.
+    mmc_iso_path = None
+    lmc_iso_path = None
 
     _, param = _find_product_with_pub(root_product, pub_name)
 
@@ -1023,11 +1590,16 @@ def _actuate_parameter(catia, active_doc, root_product,
                 sp = clash_r.get("second_product")
                 print(f"  [SVG] MMC clash {idx+1}/{total}: isolating {clash_r.get('p1_name','?')} ↔ {clash_r.get('p2_name','?')}")
                 _isolate_pair(active_doc, root_product, fp, sp)
-                img_path = _capture_and_annotate_clash(catia, active_doc, clash_r, clash_idx=idx)
-                dec = _show_hitl_ui(img_path, clash_r, pub_name, "MMC", idx, total)
-                print(f"  [HITL] MMC clash {idx+1}/{total} decision: {dec.upper()}")
+                img_path = _capture_and_annotate_clash(catia, active_doc, clash_r,
+                                                       clash_idx=idx, save_dir=mmc_save_dir)
+                if idx == 0 and img_path:
+                    iso_candidate = os.path.join(mmc_save_dir, f'clash_{idx:03d}_iso.png')
+                    mmc_iso_path = iso_candidate if os.path.isfile(iso_candidate) else img_path
+                dec, note = _show_hitl_ui(img_path, clash_r, pub_name, "MMC", idx, total)
+                print(f"  [HITL] MMC clash {idx+1}/{total} decision: {dec.upper()}" +
+                      (f" | note: {note}" if note else ""))
                 reviewed.append(dict(clash_r,
-                                     comment=f"HITL:{dec}",
+                                     comment=f"HITL:{dec}" + (f" | {note}" if note else ""),
                                      keep=("Yes" if dec == "approve" else "No"),
                                      image_path=img_path))
             # All MMC clashes reviewed — now restore visibility
@@ -1066,11 +1638,16 @@ def _actuate_parameter(catia, active_doc, root_product,
                 sp = clash_r.get("second_product")
                 print(f"  [SVG] LMC clash {idx+1}/{total}: isolating {clash_r.get('p1_name','?')} ↔ {clash_r.get('p2_name','?')}")
                 _isolate_pair(active_doc, root_product, fp, sp)
-                img_path = _capture_and_annotate_clash(catia, active_doc, clash_r, clash_idx=idx)
-                dec = _show_hitl_ui(img_path, clash_r, pub_name, "LMC", idx, total)
-                print(f"  [HITL] LMC clash {idx+1}/{total} decision: {dec.upper()}")
+                img_path = _capture_and_annotate_clash(catia, active_doc, clash_r,
+                                                       clash_idx=idx, save_dir=lmc_save_dir)
+                if idx == 0 and img_path:
+                    iso_candidate = os.path.join(lmc_save_dir, f'clash_{idx:03d}_iso.png')
+                    lmc_iso_path = iso_candidate if os.path.isfile(iso_candidate) else img_path
+                dec, note = _show_hitl_ui(img_path, clash_r, pub_name, "LMC", idx, total)
+                print(f"  [HITL] LMC clash {idx+1}/{total} decision: {dec.upper()}" +
+                      (f" | note: {note}" if note else ""))
                 reviewed.append(dict(clash_r,
-                                     comment=f"HITL:{dec}",
+                                     comment=f"HITL:{dec}" + (f" | {note}" if note else ""),
                                      keep=("Yes" if dec == "approve" else "No"),
                                      image_path=img_path))
             # All LMC clashes reviewed — now restore visibility
@@ -1082,6 +1659,15 @@ def _actuate_parameter(catia, active_doc, root_product,
 
         if not has_lmc_clash:
             time.sleep(0.5)
+
+        # #8 MMC/LMC delta view — side-by-side isometric comparison.
+        if mmc_iso_path or lmc_iso_path:
+            delta_path = os.path.join(save_base, 'delta_MMC_vs_LMC.png')
+            _generate_delta_view(
+                mmc_iso_path or lmc_iso_path,
+                lmc_iso_path or mmc_iso_path,
+                delta_path, pub_name, upper_limit, lower_limit,
+            )
 
     finally:
         # Safety net: remove any clash objects not yet deleted
