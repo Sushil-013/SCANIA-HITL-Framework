@@ -26,7 +26,7 @@ The framework is orchestrated by a unified `CustomTkinter` Master Application (`
 >         ▼
 >   LAYER 4 — CAD Actuation & DMU Clash Validation
 >         │   Drives CATIA to MMC/LMC, executes DMU Space Analysis, 
->         │   generates 4-view camera montage, captures HITL decision
+>         │   captures annotated clash evidence, records HITL decision
 >         ▼
 >   Report Generator
 >         Standalone HTML report generated for engineering review
@@ -42,13 +42,13 @@ Extracts geometric dimensions and tolerances (GD&T) from 2D PDF drawings using a
 * **Agent 1A (Vision):** Splits the drawing into 4 overlapping quadrants. Scans for raw text, enforcing strict spatial rules for Feature Control Frames (FCF) and datum attachments.
 * **Agent 1B (JSON Structuring):** A text-only agent that parses the raw text into strict JSON, applying custom merging rules to resolve overlap artifacts.
 * **Agent 1C (QA Audit):** Cross-checks the JSON against the raw vision text to ensure zero dropped dimensions.
-* **HITL Gatekeeper:** Extracted tolerances are displayed in a custom Tkinter UI, requiring the engineer to **approve, edit, or reject** the data before it is committed to the database.
+* **HITL Gatekeeper & Nx Expansion:** Extracted tolerances are displayed in a custom Tkinter UI, requiring the engineer to **approve, edit, or reject** the data. If approved, grouped features (e.g., "4X") are automatically expanded into distinct database rows for 1-to-1 CAD mapping.
 
 ### 🌐 Layer 2: Logical Module (CAD Extraction)
 **File:** `agents/A2_Cad_Extraction.py`  
 Scans the active 3D CAD environment to discover controllable parameters.
 * **COM API Integration:** Connects directly to the live CATIA V5 / ENOVIA VPM session via `win32com.client`.
-* **Tree Walking:** Recursively walks the `.CATProduct` assembly tree to locate all officially "Published" parameters. 
+* **Tree Walking & Dual-Path Resolution:** Recursively walks the `.CATProduct` assembly tree to locate all officially "Published" parameters, using a robust dual-path fallback strategy to prevent API crashes. 
 * **Database Registration:** Extracts the internal parameter name, formula, current value, and unit, saving them to the database for future actuation.
 
 ### 🤝 Layer 3: Logical Module (Semantic Mapping)
@@ -61,17 +61,17 @@ Because 2D drawing annotations rarely match 3D CAD parameter names perfectly, th
 **File:** `agents/A4_The_Actuator.py`  
 The deterministic execution engine that physically drives the CAD model and detects clashes.
 * **Boundary Actuation:** Automatically computes the Maximum Material Condition (**MMC**) and Least Material Condition (**LMC**) boundaries for each mapped parameter and drives the live CATIA model to those extremes.
-* **Safe Reversion:** Wraps all CATIA manipulation in strict `try/finally` blocks, guaranteeing the CAD model **reverts to nominal** after evaluation to prevent master model corruption.
+* **Safe Reversion & Tree Hygiene:** Wraps all CATIA manipulation in strict `try/finally` blocks, guaranteeing the CAD model **reverts to nominal** after evaluation. It also actively deletes temporary DMU objects to prevent master model corruption.
 * **DMU Space Analysis:** Programmatically runs CATIA Clash Detection specifically targeting the actuated parts, filtering out irrelevant background noise.
-* **4-View Camera Montage:** Uses the `Pillow` library to automatically generate a 2x2 camera grid (Isometric, Top, Front, Bottom) centered directly on the exact spatial coordinates of the geometric clash, complete with a data HUD overlay.
-* **HITL Decision Review:** Pauses CAD execution and presents the montage screenshot to the engineer, who must classify the clash as an *Approve*, *Reject (False Positive)*, or *Override*. 
+* **Resilient Capture & Clash HUD:** Re-frames the CATIA viewport and safely captures the clash using a multi-format fallback loop (PNG -> JPG -> BMP). The `Pillow` library is then used to overlay a red bounding frame and an informational "Clash HUD" (detailing penetration depth and part IDs) directly onto the image.
+* **HITL Decision Review:** Pauses CAD execution and presents the annotated screenshot to the engineer, who must classify the clash as an *Approve*, *Reject (False Positive)*, or *Override*. 
 
 ### 📊 Automated Reporting
 **File:** `generate_report.py`  
 A dedicated module that transforms the final database results into a professional, interactive HTML report for engineering review.
-* **Zero-Dependency Portability (Base64):** Dynamically encodes all captured 4-view camera montages into `base64` data-URIs. This embeds the images directly into the HTML markup, creating a **single, standalone file** that can be easily emailed or uploaded to Scania’s PLM system without broken image links.
+* **Zero-Dependency Portability (Base64):** Dynamically encodes all captured clash screenshots into `base64` data-URIs. This embeds the images directly into the HTML markup, creating a **single, standalone file** that can be easily emailed or uploaded to Scania’s PLM system without broken image links.
 * **Interactive Dashboard:** Features a top-level KPI summary, a pass/fail matrix for all evaluated parameters, and a detailed, color-coded conflict ledger.
-* **Photographic Evidence:** Engineers can click on any recorded clash within the report ledger to instantly expand and view the high-resolution 4-view spatial montage.
+* **Photographic Evidence:** Engineers can click on any recorded clash within the report ledger to instantly expand and view the high-resolution, HUD-annotated spatial capture.
 
 ---
 
@@ -84,16 +84,17 @@ The framework relies on a local SQLite database (`eats_validation.db`) to mainta
 | `drawings` & `semantic_tolerances` | Stores the AI extraction results and drawing metadata. |
 | `catia_assemblies` & `catia_parameters` | Stores the 3D parametric data pulled directly from ENOVIA VPM. |
 | `human_mapping` | The relational bridge joining the 2D ID (`vlm_id`) to the 3D ID (`cad_id`). |
-| `actuation_results` | The final output table storing the evaluated boundaries, parts involved, clash penetration depths, image paths, and human review decisions. |
+| `dmu_mmc_results` & `dmu_lmc_results` | The final output tables storing the evaluated boundaries, parts involved, clash penetration depths, image paths, and human review decisions. |
 
 ---
 
 ## 🛠️ Setup & Installation
 
 ### Prerequisites
-* **Python:** 3.10 or higher.
-* **CAD Software:** CATIA V5 / ENOVIA VPM installed and licensed with SPA (Space Analysis) capabilities.
-* **OS:** Windows (required for `win32com` CATIA COM interaction).
+* **Operating System:** Windows 10 or 11 (Strictly required for the PyWin32 COM API interaction with CATIA).
+* **Python:** Version 3.10 or higher.
+* **CAD Software:** CATIA V5 or ENOVIA VPM installed locally, with an active **SPA (Space Analysis)** license required for the DMU clash detection module.
+* **API Access:** An active OpenAI API key (for Layer 1 GPT-4o vision extraction).
 
 ### Installation
 1. **Clone the repository:**
