@@ -15,6 +15,9 @@ from PIL import Image
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# Always point at Approach_1_SQLite_Tkinter/eats_validation.db regardless of CWD
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
+
 # Injected by master_app.py before import so Toplevel windows use the
 # existing Tk root instead of spawning a second one.
 _MASTER_ROOT = None
@@ -45,7 +48,7 @@ client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # DATABASE SETUP
 # ---------------------------------------------------------------------------
 def setup_database():
-    conn   = sqlite3.connect('eats_validation.db')
+    conn   = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('PRAGMA foreign_keys = ON')
 
@@ -1287,8 +1290,7 @@ def _select_drawing():
 
     already_done = set()
     try:
-        _db  = sqlite3.connect(
-            os.path.join(os.path.dirname(script_dir), 'eats_validation.db'))
+        _db  = sqlite3.connect(DB_PATH)
         _cur = _db.cursor()
         _cur.execute("SELECT file_path FROM drawings WHERE status='COMPLETED'")
         already_done = {row[0] for row in _cur.fetchall()}
