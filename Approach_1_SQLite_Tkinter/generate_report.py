@@ -89,8 +89,9 @@ def generate_html_report(db_path: str = DB_PATH,
 
     # ── Meta ─────────────────────────────────────────────────────────────────
     first        = rows[0]
-    project_tag  = first["project_tag"]  or "N/A"
     assembly     = first["assembly_name"] or "N/A"
+    # For the filename: use assembly name (stable, unambiguous)
+    report_tag   = assembly
     generated_at = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
     total        = len(rows)
     clashes      = sum(1 for r in rows if "CLASH" in (r["type"] or "").upper()
@@ -102,7 +103,12 @@ def generate_html_report(db_path: str = DB_PATH,
     for r in rows:
         p = r["publication_name"] or "?"
         if p not in pubs:
-            pubs[p] = {"MMC": None, "LMC": None}
+            # Capture the drawing_name for this publication (first row wins)
+            try:
+                dwg = r["drawing_name"] or r["project_tag"] or "—"
+            except Exception:
+                dwg = r["project_tag"] or "—"
+            pubs[p] = {"MMC": None, "LMC": None, "drawing": dwg}
         bd = (r["boundary"] or "").upper()
         if bd in ("MMC", "LMC"):
             # Worst status for this boundary
@@ -123,6 +129,7 @@ def generate_html_report(db_path: str = DB_PATH,
         summary_rows_html += f"""
           <tr>
             <td>{pub}</td>
+            <td><span class="drawing-tag">{bd['drawing']}</span></td>
             {_pub_cell(bd["MMC"])}
             {_pub_cell(bd["LMC"])}
           </tr>"""
@@ -155,7 +162,7 @@ def generate_html_report(db_path: str = DB_PATH,
         detail_rows_html += f"""
           <tr class="{row_cls}" {toggle_js}>
             <td>{r["id"]}</td>
-            <td><strong>{r["project_tag"] or "—"}</strong></td>
+            <td><span class="drawing-tag">{r["drawing_name"] if "drawing_name" in r.keys() else (r["project_tag"] or "—")}</span></td>
             <td>{r["publication_name"] or "—"}</td>
             <td><span class="boundary-badge {(r["boundary"] or '').lower()}">{r["boundary"] or "—"}</span></td>
             <td>{r["product1"] or "—"}</td>
@@ -172,7 +179,7 @@ def generate_html_report(db_path: str = DB_PATH,
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>EATS Validation Report — {project_tag}</title>
+  <title>EATS Validation Report — {assembly}</title>
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -298,6 +305,15 @@ def generate_html_report(db_path: str = DB_PATH,
     .boundary-badge.mmc {{ background: #d6eaf8; color: #1a5276; }}
     .boundary-badge.lmc {{ background: #fdebd0; color: #784212; }}
 
+    .drawing-tag {{
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #eef1f7;
+      color: #2c3e6b;
+    }}
     /* ── Footer ── */
     .footer {{
       text-align: center;
@@ -329,7 +345,6 @@ def generate_html_report(db_path: str = DB_PATH,
   <div>
     <h1>&#9881;  EATS — DMU Validation Report</h1>
     <div class="meta">
-      <span>&#128196; Project&nbsp;&nbsp;:&nbsp; <strong>{project_tag}</strong></span><br/>
       <span>&#127981; Assembly&nbsp;:&nbsp; <strong>{assembly}</strong></span>
     </div>
   </div>
@@ -365,6 +380,7 @@ def generate_html_report(db_path: str = DB_PATH,
     <thead>
       <tr>
         <th>Publication Name</th>
+        <th>Source Drawing</th>
         <th>MMC Result</th>
         <th>LMC Result</th>
       </tr>
@@ -382,7 +398,7 @@ def generate_html_report(db_path: str = DB_PATH,
     <thead>
       <tr>
         <th>#</th>
-        <th>Project Tag</th>
+        <th>Source Drawing</th>
         <th>Publication</th>
         <th>Boundary</th>
         <th>Product A</th>
@@ -408,7 +424,7 @@ def generate_html_report(db_path: str = DB_PATH,
 
     # ── Save ─────────────────────────────────────────────────────────────────
     ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_name = f"EATS_Report_{project_tag.replace(' ', '_')}_{ts}.html"
+    out_name = f"EATS_Report_{report_tag.replace(' ', '_')}_{ts}.html"
     out_path = os.path.join(output_dir, out_name)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)

@@ -408,17 +408,38 @@ class MasterApp(ctk.CTk):
         return frame
 
     def _run_in_thread(self, btn: ctk.CTkButton, fn, *args):
-        """Disable btn, run fn(*args) in a daemon thread, re-enable on finish."""
+        """Disable btn, run fn(*args) in a daemon thread.
+        On success  → button becomes green '↺  Re-run'.
+        On failure  → button restores to original text/colour so user can retry.
+        """
+        orig_text  = btn.cget("text")
+        orig_fg    = btn.cget("fg_color")
+        orig_hover = btn.cget("hover_color")
         btn.configure(state="disabled", text="⏳  Running…")
 
         def worker():
+            success = False
             try:
                 fn(*args)
-            except Exception as exc:
+                success = True
+            except Exception:
                 import traceback
                 print(f"❌ Agent error:\n{traceback.format_exc()}")
             finally:
-                btn.after(0, lambda: btn.configure(state="normal"))
+                if success:
+                    btn.after(0, lambda: btn.configure(
+                        state="normal",
+                        text="↺  Re-run",
+                        fg_color="#16a34a",
+                        hover_color="#15803d",
+                    ))
+                else:
+                    btn.after(0, lambda: btn.configure(
+                        state="normal",
+                        text=orig_text,
+                        fg_color=orig_fg,
+                        hover_color=orig_hover,
+                    ))
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
@@ -510,6 +531,7 @@ class MasterApp(ctk.CTk):
             font=ctk.CTkFont("Segoe UI", 13, "bold"),
             fg_color=self._ACCENT, hover_color=self._ACCENT_HOV,
         )
+        self._a1_btn = a1_btn  # expose so _a1_browse can reset state
         a1_btn.pack(side="left")
         a1_status = self._status_label(run_inner)
         a1_status.pack(side="left", padx=16)
@@ -561,6 +583,14 @@ class MasterApp(ctk.CTk):
         )
         if path:
             self._a1_path_var.set(path)
+            # If a previous run completed (button is green Re-run), reset it
+            # back to the original Run state so it's clear this is a fresh file.
+            if hasattr(self, "_a1_btn") and self._a1_btn.cget("text") == "↺  Re-run":
+                self._a1_btn.configure(
+                    text="▶   Run Perception Agent",
+                    fg_color=self._ACCENT,
+                    hover_color=self._ACCENT_HOV,
+                )
 
     # =========================================================================
     # PANEL A2 — CAD EXTRACTION

@@ -1797,10 +1797,12 @@ def run_agent_3_actuation():
                 st.feature_name,
                 st.nominal_value,
                 st.upper_tolerance,
-                st.lower_tolerance
+                st.lower_tolerance,
+                COALESCE(NULLIF(d.project_tag,''), d.file_name) AS drawing_name
             FROM  human_mapping       m
-            JOIN  semantic_tolerances st ON st.id  = m.vlm_id
-            JOIN  catia_parameters    cp ON cp.id  = m.cad_id
+            JOIN  semantic_tolerances st ON st.id        = m.vlm_id
+            JOIN  catia_parameters    cp ON cp.id        = m.cad_id
+            JOIN  drawings            d  ON d.drawing_id = st.drawing_id
             WHERE m.assembly_id = ?
         ''', (target_assembly_id,))
         mappings = cursor.fetchall()
@@ -1820,7 +1822,7 @@ def run_agent_3_actuation():
     results = []
 
     # ── Process each mapping ──────────────────────────────────────────────
-    for pub_name, part_path, feature_name, nominal, upper_tol, lower_tol in mappings:
+    for pub_name, part_path, feature_name, nominal, upper_tol, lower_tol, drawing_name in mappings:
         # Re-acquire root_product each iteration: a COM Update() on a prior
         # parameter can leave the old reference stale in win32com.
         try:
@@ -1868,6 +1870,7 @@ def run_agent_3_actuation():
             CREATE TABLE actuation_results (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_tag      TEXT,
+                drawing_name     TEXT,
                 assembly_name    TEXT,
                 publication_name TEXT,
                 boundary         TEXT,
@@ -1885,35 +1888,31 @@ def run_agent_3_actuation():
             )
         ''')
 
-        # Resolve project_tag from the drawing linked to this assembly's mappings
-        try:
-            cur.execute('''
-                SELECT COALESCE(NULLIF(d.project_tag,''), d.file_name)
-                FROM   drawings d
-                JOIN   semantic_tolerances st ON st.drawing_id = d.drawing_id
-                JOIN   human_mapping m ON m.vlm_id = st.id
-                WHERE  m.assembly_id = ?
-                LIMIT  1
-            ''', (target_assembly_id,))
-            tag_row = cur.fetchone()
-            run_project_tag = tag_row[0] if tag_row else target_assembly_name
-        except Exception:
-            run_project_tag = target_assembly_name
+        # project_tag resolved per-publication via the drawing that was mapped
+        # Build a lookup: publication_name -> (project_tag, drawing_name)
+        pub_drawing_map = {}
+        for pub_name_m, _, _, _, _, _, dwg_name in mappings:
+            pub_drawing_map[pub_name_m] = dwg_name
+        # Fallback project_tag = assembly name (used only if pub not found)
+        fallback_tag = target_assembly_name
 
         row_count = 0
         for pub, u_sum, l_sum, mmc_rows, lmc_rows in results:
+            # Per-publication drawing tag
+            pub_drawing  = pub_drawing_map.get(pub, fallback_tag)
             for boundary, rows in (("MMC", mmc_rows), ("LMC", lmc_rows)):
                 for r in rows:
                     cur.execute(
                         '''
                         INSERT INTO actuation_results
-                            (project_tag, assembly_name, publication_name, boundary,
+                            (project_tag, drawing_name, assembly_name, publication_name, boundary,
                              product1, product2, type, value, status, info,
                              keep, comment, location, image_path)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         ''',
                         (
-                            run_project_tag,
+                            pub_drawing,
+                            pub_drawing,
                             target_assembly_name,
                             pub,
                             boundary,
