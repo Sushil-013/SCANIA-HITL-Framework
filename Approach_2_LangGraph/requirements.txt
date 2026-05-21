@@ -1,0 +1,30 @@
+# OpenAI drawing pipeline requirements
+# Python target: 3.10.x on Windows
+#
+# Notes:
+# - tkinter is part of the standard Windows Python install and is not pip-installed here.
+# - Layers 2 and 3 need CATIA on Windows, plus pywin32 and pycatia.
+# - This file reflects the direct packages used by the current openai_pipeline runtime.
+
+openai==2.29.0
+Pillow==9.4.0
+PyMuPDF==1.27.2.2
+matplotlib==3.10.8
+numpy==1.26.4
+opencv-python==4.8.1.78
+scikit-image==0.21.0
+
+# Local CRAFT + GLM-OCR stack used by bbox refinement/value verification
+torch==2.11.0
+torchvision==0.26.0
+transformers==5.3.0
+accelerate==1.13.0
+safetensors==0.7.0
+
+# Helper/export utilities used by bundled pipeline tools
+python-pptx==1.0.2
+Pygments==2.20.0
+
+# Windows / CATIA automation for Layer 2 and Layer 3
+pywin32==311 ; platform_system == "Windows"
+pycatia==0.9.6 ; platform_system == "Windows"
