@@ -1177,8 +1177,8 @@ def _build_hitl_content(container, decision, on_decide, image_path,
     """
     BG_ROOT   = "#f4f6f9"
     BG_CARD   = "#ffffff"
-    BG_HEADER = "#1a2744"
-    BG_SUBHDR = "#2c3e6b"
+    BG_HEADER = "#004852"
+    BG_SUBHDR = "#006678"
     BG_IMG    = "#ffffff"
     FG_WHITE  = "#ffffff"
     FG_DARK   = "#1a1a2e"
@@ -1217,7 +1217,7 @@ def _build_hitl_content(container, decision, on_decide, image_path,
              padx=10, pady=5).pack(side="right", padx=(0, 4))
     tk.Label(badge_f,
              text=f"  Conflict  {clash_idx + 1} / {total_clashes}  ",
-             bg="#3d5a99", fg=FG_WHITE, font=f_sm,
+             bg="#006678", fg=FG_WHITE, font=f_sm,
              padx=6, pady=5).pack(side="right", padx=(0, 4))
 
     # ── FOOTER STATUS BAR — packed BEFORE content so it is not squeezed out ──
@@ -1394,11 +1394,11 @@ def _build_hitl_content(container, decision, on_decide, image_path,
         zoom_win.title(f"Full View — {pub_name}  [{boundary}]  Conflict {clash_idx + 1}")
         zoom_win.geometry("1320x900")
         zoom_win.minsize(600, 400)
-        _zf = tk.Frame(zoom_win, bg="#1d2030")
+        _zf = tk.Frame(zoom_win, bg="#002d35")
         _zf.pack(fill="both", expand=True)
         _zf.columnconfigure(0, weight=1)
         _zf.rowconfigure(0, weight=1)
-        _zcanvas = tk.Canvas(_zf, bg="#1d2030", highlightthickness=0)
+        _zcanvas = tk.Canvas(_zf, bg="#002d35", highlightthickness=0)
         _zcanvas.grid(row=0, column=0, sticky="nsew")
         _ys = tk.Scrollbar(_zf, orient="vertical",   command=_zcanvas.yview)
         _xs = tk.Scrollbar(_zf, orient="horizontal", command=_zcanvas.xview)
@@ -1419,13 +1419,13 @@ def _build_hitl_content(container, decision, on_decide, image_path,
             _zrender()
         _zcanvas.bind("<MouseWheel>", _zwheel)
         tk.Label(zoom_win, text="Scroll to zoom  •  Double-click to fit",
-                 bg="#1d2030", fg="#6c8ebf", font=f_sm).pack(side="bottom")
+                 bg="#002d35", fg="#6abdc5", font=f_sm).pack(side="bottom")
         zoom_win.after(50, _zrender)
 
     img_lbl.bind("<Button-1>", _open_zoom)
     img_lbl.config(cursor="hand2")
     tk.Label(left, text="Click image to zoom  •  Live CATIA model on other monitor",
-             bg=BG_IMG, fg="#9aadca", font=f_sm).pack(side="bottom", pady=(0, 4))
+             bg=BG_IMG, fg="#80c4cc", font=f_sm).pack(side="bottom", pady=(0, 4))
 
 
 def _show_hitl_ui(image_path, clash_result, pub_name, boundary, clash_idx, total_clashes):

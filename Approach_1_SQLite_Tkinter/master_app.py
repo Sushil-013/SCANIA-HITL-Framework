@@ -99,7 +99,7 @@ class ConsoleRedirector:
         inner.tag_config("green",   foreground="#166534")
         inner.tag_config("red",     foreground="#991b1b")
         inner.tag_config("orange",  foreground="#92400e")
-        inner.tag_config("cyan",    foreground="#0e7490")
+        inner.tag_config("cyan",    foreground="#004852")
         inner.tag_config("magenta", foreground="#6b21a8")
         inner.tag_config("default", foreground="#1e293b")
 
@@ -180,12 +180,12 @@ class MasterApp(ctk.CTk):
     # ── Appearance ──────────────────────────────────────────────────────────
     _SIDEBAR_W   = 220
     _CONSOLE_H   = 240
-    _ACCENT      = "#1558d6"        # Scania-blue accent
-    _ACCENT_HOV  = "#1a6ef5"
-    _SIDEBAR_BG  = "#1c3a6e"        # deep navy sidebar
+    _ACCENT      = "#004852"        # Traton Blue accent
+    _ACCENT_HOV  = "#006678"         # Traton Blue hover
+    _SIDEBAR_BG  = "#004852"        # Traton Blue sidebar
     _MAIN_BG     = "#f4f6f9"        # light grey page background
     _CARD_BG     = "#ffffff"        # white cards
-    _BORDER      = "#d0d7e3"        # soft grey border
+    _BORDER      = "#b0d0d4"        # teal-tinted border
     _TEXT_MUTED  = "#6b7280"        # medium grey muted text
 
     # ── Nav items: (label, icon, panel_factory_method_name) ─────────────────
@@ -255,7 +255,7 @@ class MasterApp(ctk.CTk):
         # Console pane
         self._console_visible = True
         console_outer = ctk.CTkFrame(
-            right, fg_color="#e8ecf3",
+            right, fg_color="#e0eef0",
             border_color=self._BORDER, border_width=1,
             corner_radius=0, height=self._CONSOLE_H
         )
@@ -287,7 +287,7 @@ class MasterApp(ctk.CTk):
         ctk.CTkButton(
             hdr, text="Clear", width=54, height=20,
             font=ctk.CTkFont(size=10),
-            fg_color="#2c5282", hover_color="#2a4a8a",
+            fg_color="#006678", hover_color="#004852",
             command=self._clear_console
         ).pack(side="right", padx=(6, 0), pady=4)
 
@@ -312,7 +312,7 @@ class MasterApp(ctk.CTk):
         ctk.CTkLabel(
             self._console_stub, text="  ● Console Output  (hidden)",
             font=ctk.CTkFont("Consolas", 10),
-            text_color="#a8c4e8", anchor="w"
+            text_color="#80c4cc", anchor="w"
         ).grid(row=0, column=0, sticky="w", padx=8)
         ctk.CTkButton(
             self._console_stub, text="▲  Show", width=72, height=20,
@@ -326,7 +326,7 @@ class MasterApp(ctk.CTk):
             self._sidebar,
             text="  PIPELINE LAYERS",
             font=ctk.CTkFont("Segoe UI", 9, "bold"),
-            text_color="#a8c4e8",
+            text_color="#80c4cc",
             anchor="w"
         ).pack(fill="x", padx=14, pady=(18, 6))
 
@@ -340,8 +340,8 @@ class MasterApp(ctk.CTk):
                 corner_radius=8,
                 font=ctk.CTkFont("Segoe UI", 13),
                 fg_color="transparent",
-                hover_color="#2c5282",
-                text_color="#dce9f7",
+                hover_color="#006678",
+                text_color="#d0eef2",
                 command=lambda l=label: self._switch_panel(l),
             )
             btn.pack(fill="x", padx=10, pady=2)
@@ -353,7 +353,7 @@ class MasterApp(ctk.CTk):
             self._sidebar,
             text="v2.0  |  Python " + sys.version[:6],
             font=ctk.CTkFont("Segoe UI", 9),
-            text_color="#7aabdc",
+            text_color="#6abdc5",
         ).pack(pady=(0, 14))
 
     # =========================================================================
@@ -364,7 +364,7 @@ class MasterApp(ctk.CTk):
         # Un-highlight previous
         if self._active_nav and self._active_nav in self._nav_buttons:
             self._nav_buttons[self._active_nav].configure(
-                fg_color="transparent", text_color="#dce9f7"
+                fg_color="transparent", text_color="#d0eef2"
             )
 
         # Highlight selected
@@ -504,14 +504,14 @@ class MasterApp(ctk.CTk):
             row, textvariable=self._a1_path_var,
             width=460, height=36, state="readonly",
             font=ctk.CTkFont("Consolas", 11),
-            fg_color="#eef2f7", border_color=self._BORDER,
+            fg_color="#e8f4f6", border_color=self._BORDER,
             text_color="#1e293b"
         )
         path_entry.pack(side="left", padx=(0, 10))
 
         ctk.CTkButton(
             row, text="📂  Browse…", width=120, height=36,
-            fg_color="#1558d6", hover_color="#1a6ef5",
+            fg_color="#004852", hover_color="#006678",
             text_color="#ffffff",
             border_width=0,
             font=ctk.CTkFont("Segoe UI", 11, "bold"),

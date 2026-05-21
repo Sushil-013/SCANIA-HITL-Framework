@@ -224,7 +224,7 @@ def build_mapping_ui(parent_frame):
     ensure_mapping_table()
 
     BG   = "#f5f5f5"
-    NAV  = "#1c3a6e"   # dark navy (matches master sidebar)
+    NAV  = "#004852"   # Traton Blue (matches master sidebar)
 
     # clear any previous content
     for w in parent_frame.winfo_children():
@@ -269,7 +269,7 @@ def build_mapping_ui(parent_frame):
              font=('Segoe UI', 11, 'bold'), bg=NAV, fg="white").pack(side=tk.LEFT, padx=14, fill=tk.Y)
 
     # ── Context Filter bar ───────────────────────────────────────────────
-    flt_frame = tk.Frame(parent_frame, bg="#dce8f7", pady=5)
+    flt_frame = tk.Frame(parent_frame, bg="#d0eaed", pady=5)
     flt_frame.pack(fill=tk.X)
 
     tk.Label(flt_frame, text="  Session Context:",
@@ -283,7 +283,7 @@ def build_mapping_ui(parent_frame):
     dwg_cb.current(0)
     dwg_cb.pack(side=tk.LEFT, padx=(2, 12))
 
-    tk.Label(flt_frame, text="3D Assembly:", font=('Segoe UI', 9), bg="#dce8f7").pack(side=tk.LEFT)
+    tk.Label(flt_frame, text="3D Assembly:", font=('Segoe UI', 9), bg="#d0eaed").pack(side=tk.LEFT)
     asm_var = tk.StringVar()
     asm_cb  = ttk.Combobox(flt_frame, textvariable=asm_var, state="readonly",
                             width=34, font=('Segoe UI', 9))
@@ -295,7 +295,7 @@ def build_mapping_ui(parent_frame):
     asm_cb.pack(side=tk.LEFT, padx=(2, 12))
 
     # Part filter — narrows 3D side to one specific part instance
-    tk.Label(flt_frame, text="Part:", font=('Segoe UI', 9), bg="#dce8f7").pack(side=tk.LEFT)
+    tk.Label(flt_frame, text="Part:", font=('Segoe UI', 9), bg="#d0eaed").pack(side=tk.LEFT)
     part_var = tk.StringVar(value="All Parts")
     part_cb  = ttk.Combobox(flt_frame, textvariable=part_var, state="readonly",
                              width=26, font=('Segoe UI', 9))
@@ -304,7 +304,7 @@ def build_mapping_ui(parent_frame):
     part_cb.pack(side=tk.LEFT, padx=(2, 12))
 
     filter_lbl = tk.Label(flt_frame, text="", font=('Segoe UI', 8, 'italic'),
-                          bg="#dce8f7", fg="#555")
+                          bg="#d0eaed", fg="#555")
     filter_lbl.pack(side=tk.LEFT, padx=6)
 
     refresh_btn = tk.Button(flt_frame, text="↺  Refresh DB",
@@ -359,10 +359,10 @@ def build_mapping_ui(parent_frame):
     cad_tree.column("parameter", width=245, anchor=tk.W)
     cad_tree.column("value",     width=95,  anchor=tk.CENTER, stretch=False)
     # Part header rows — styled, non-selectable
-    cad_tree.tag_configure('part_hdr',  background='#1c3a6e', foreground='white',
+    cad_tree.tag_configure('part_hdr',  background='#004852', foreground='white',
                             font=('Segoe UI', 9, 'bold'))
     cad_tree.tag_configure('cad_row',   background='#ffffff', foreground='#1e293b')
-    cad_tree.tag_configure('cad_alt',   background='#f0f4fa', foreground='#1e293b')
+    cad_tree.tag_configure('cad_alt',   background='#e8f4f5', foreground='#1e293b')
     cad_sb = ttk.Scrollbar(right_frame, orient=tk.VERTICAL, command=cad_tree.yview)
     cad_tree.configure(yscrollcommand=cad_sb.set)
     cad_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -404,7 +404,7 @@ def build_mapping_ui(parent_frame):
     confirm_btn = tk.Button(caution_btn_frame,
                             text="✅  Yes, Link Anyway",
                             font=('Segoe UI', 9, 'bold'),
-                            bg="#1c3a6e", fg="white",
+                            bg="#004852", fg="white",
                             padx=14, pady=4, relief=tk.FLAT, cursor="hand2")
     confirm_btn.pack(side=tk.LEFT, padx=(0, 10))
 
