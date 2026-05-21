@@ -33,8 +33,3 @@ Recommended academic citation:
 }
 ```
 
-Practical note:
-
-- If you are only sharing this package with a friend or professor, citation is usually not a legal requirement.
-- Keeping the bundled license text is the important redistribution requirement under MIT.
-- For a thesis, paper, report, or presentation, citation is strongly recommended.
