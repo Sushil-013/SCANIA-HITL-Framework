@@ -1,4 +1,4 @@
-# SCANIA HITL Framework
+# 🚛 SCANIA HITL Framework
 
 This repository contains two pipeline implementations for geometric validation between 2D drawings and 3D CATIA models:
 
