@@ -45,4 +45,8 @@ Please navigate to the specific folder of the approach you wish to run and read 
 
 ## 📖 Comprehensive Documentation
 
-For a deep dive into the overarching system architecture, mathematical boundary calculations (MMC/LMC), database schemas, and CATIA API integration logic, please visit our comprehensive **[GitHub Wiki](https://github.com/Sushil-013/SCANIA-HITL-Framework/wiki)**.
+For a comprehensive, step-by-step User Manual on how to operate the HITL UI, map parameters, and interpret the final HTML engineering reports, please visit our overarching project Wiki:
+
+👉 SCANIA HITL Framework -  **[GitHub Wiki](https://github.com/Sushil-013/SCANIA-HITL-Framework/wiki)**.
+
+(The Wiki also includes deep dives into the system architecture, mathematical boundary calculations for MMC/LMC, database schemas, and CATIA API integration logic).
