@@ -2,10 +2,6 @@
 
 An automated **Human-in-the-Loop (HITL)** pipeline bridging 2D legacy engineering drawings to 3D **CATIA V5 ENOVIA VPM** models for early-stage clash detection. 
 
-This software was developed as part of a Master's Thesis at **Linköping University (LiU)** in collaboration with **Scania CV AB**. It serves as an exploratory system to solve the "Semantic Gap" between disconnected 2D visual manufacturing data and deterministic parametric 3D CAD environments.
-
----
-
 ## 🏗️ System Architecture & Multi-Agent Pipeline
 
 The framework is orchestrated by a unified `CustomTkinter` Master Application (`master_app.py`) which acts as the Control Center. The pipeline is divided into four sequential layers. To ensure safety and determinism, probabilistic AI outputs are strictly air-gapped from the CAD environment via a central SQLite database (`eats_validation.db`) and rigorous HITL validation gates.
