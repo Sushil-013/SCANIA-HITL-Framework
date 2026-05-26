@@ -94,7 +94,7 @@ For ease of use within the Scania enterprise environment, this entire pipeline h
 * An active OpenAI API key.
 
 ### How to Run
-1. Download the latest `SCANVA.exe` from the **[Releases](../../releases)** page on this GitHub repository.
+1. Download the latest `SCANVA 3.0.exe` from the **[Releases](../../releases)** page on this GitHub repository.
 2. Place the `.exe` inside an empty folder on your machine.
 3. Double-click the `.exe` to launch the application.
 4. **API Key Authentication:** * On first launch, the app will display a secure prompt asking for your OpenAI API Key. 
