@@ -1385,6 +1385,8 @@ def run_dmu_cycle(
         summary_payload["requested_workbench"] = requested_workbench
         summary_payload["current_workbench"] = current_workbench
         return summary_payload
+
+
     finally:
         cleanup_temporary_clashes(root_product, temporary_clash_names)
         cleanup_temporary_groups(root_product, scope.temporary_group_names)
@@ -1413,7 +1415,7 @@ def import_run_to_sqlite(db_path, tolerance_mode, document_id, drawing_part_numb
     )
 
 
-def run_layer3_tolerance_sweep_to_sqlite(
+def run_layer3_dmu_tolerance_stage(
     db_path,
     document_id,
     drawing_part_number,
@@ -1600,3 +1602,7 @@ def run_layer3_tolerance_sweep_to_sqlite(
         summary_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         result["summary_json_path"] = str(summary_path)
     return result
+
+
+# Backward-compatible alias for existing integrations.
+run_layer3_tolerance_sweep_to_sqlite = run_layer3_dmu_tolerance_stage

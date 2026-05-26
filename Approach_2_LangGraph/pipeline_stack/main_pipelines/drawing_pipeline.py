@@ -2583,7 +2583,7 @@ def merge_pass_results(document_id, structure_result, dimension_result, gdt_resu
     return merged
 
 
-def run_openai_extraction_stage(
+def run_layer1_2d_extraction_stage(
     image_path,
     document_id,
     model,
@@ -3093,7 +3093,7 @@ def save_pipeline_outputs(
     return json_path, summary_path, annotated_path, output_dir
 
 
-def _run_drawing_pipeline_core(
+def _run_layer1_2d_pipeline_core(
     image_path,
     document_id=None,
     drawing_role="part",
@@ -3161,7 +3161,7 @@ def _run_drawing_pipeline_core(
             )
         )
 
-    result = run_openai_extraction_stage(
+    result = run_layer1_2d_extraction_stage(
         image_path=prepared_image_path,
         document_id=requested_document_id,
         model=model,
@@ -3414,7 +3414,7 @@ def run_catia_parameter_sync(
     )
 
 
-def run_drawing_pipeline(
+def run_layer1_2d_pipeline(
     image_path,
     document_id=None,
     drawing_role="part",
@@ -3455,7 +3455,7 @@ def run_drawing_pipeline(
     fallback_model = model
 
     def run_single_model_pass(active_model_name):
-        return _run_drawing_pipeline_core(
+        return _run_layer1_2d_pipeline_core(
             image_path=image_path,
             document_id=document_id,
             drawing_role=drawing_role,
@@ -3590,9 +3590,15 @@ def run_drawing_pipeline(
     return finalized_output
 
 
+# Backward-compatible aliases for existing integrations.
+run_openai_extraction_stage = run_layer1_2d_extraction_stage
+_run_drawing_pipeline_core = _run_layer1_2d_pipeline_core
+run_drawing_pipeline = run_layer1_2d_pipeline
+
+
 def main():
     args = parse_args()
-    output = run_drawing_pipeline(
+    output = run_layer1_2d_pipeline(
         image_path=args.image,
         document_id=args.document_id,
         drawing_role=args.drawing_role,

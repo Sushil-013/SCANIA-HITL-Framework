@@ -3,11 +3,11 @@ import sys
 from pathlib import Path
 
 try:
-    from .drawing_pipeline import run_drawing_pipeline
-    from .human_dimension_review import run_human_dimension_review
+    from .drawing_pipeline import run_layer1_2d_pipeline
+    from .human_dimension_review import run_layer1_human_review_stage
 except ImportError:
-    from openai_pipeline.pipeline_stack.main_pipelines.drawing_pipeline import run_drawing_pipeline
-    from openai_pipeline.pipeline_stack.main_pipelines.human_dimension_review import run_human_dimension_review
+    from openai_pipeline.pipeline_stack.main_pipelines.drawing_pipeline import run_layer1_2d_pipeline
+    from openai_pipeline.pipeline_stack.main_pipelines.human_dimension_review import run_layer1_human_review_stage
 
 
 DEFAULT_RESULT_FOLDER = "Results/drawing_pipeline"
@@ -419,10 +419,10 @@ def run_catia_published_parameter_capture(args, output, target_part_number):
         }
 
     try:
-        from ..catia_agents.extract_published_parameters_agent import extract_published_parameters_to_sqlite
+        from ..catia_agents.extract_published_parameters_agent import run_layer2_parameter_extraction_stage
     except ImportError as exc:
         try:
-            from openai_pipeline.pipeline_stack.catia_agents.extract_published_parameters_agent import extract_published_parameters_to_sqlite
+            from openai_pipeline.pipeline_stack.catia_agents.extract_published_parameters_agent import run_layer2_parameter_extraction_stage
         except ImportError:
             return {
                 "status": "failed",
@@ -433,7 +433,7 @@ def run_catia_published_parameter_capture(args, output, target_part_number):
             }
 
     def _run_once():
-        return extract_published_parameters_to_sqlite(
+        return run_layer2_parameter_extraction_stage(
             db_path=str(output["db_path"]),
             target_part_number=target_part_number,
             drawing_document_id=output.get("document_id"),
@@ -468,10 +468,10 @@ def run_catia_published_parameter_capture(args, output, target_part_number):
 
 def run_catia_dimension_link_ui(args, output, target_part_number):
     try:
-        from ..catia_agents.dimension_link_ui_agent import run_dimension_link_ui_from_sqlite
+        from ..catia_agents.dimension_link_ui_agent import run_layer2_dimension_linking_stage
     except ImportError as exc:
         try:
-            from openai_pipeline.pipeline_stack.catia_agents.dimension_link_ui_agent import run_dimension_link_ui_from_sqlite
+            from openai_pipeline.pipeline_stack.catia_agents.dimension_link_ui_agent import run_layer2_dimension_linking_stage
         except ImportError:
             return {
                 "status": "failed",
@@ -482,7 +482,7 @@ def run_catia_dimension_link_ui(args, output, target_part_number):
             }
 
     try:
-        return run_dimension_link_ui_from_sqlite(
+        return run_layer2_dimension_linking_stage(
             db_path=str(output["db_path"]),
             document_id=output.get("document_id"),
             catia_part_number=target_part_number,
@@ -501,10 +501,10 @@ def run_catia_dimension_link_ui(args, output, target_part_number):
 
 def run_catia_layer3_nominal(args, output, target_part_number):
     try:
-        from ..catia_agents.layer3_tolerance_dmu_agent import run_layer3_tolerance_sweep_to_sqlite
+        from ..catia_agents.layer3_tolerance_dmu_agent import run_layer3_dmu_tolerance_stage
     except ImportError as exc:
         try:
-            from openai_pipeline.pipeline_stack.catia_agents.layer3_tolerance_dmu_agent import run_layer3_tolerance_sweep_to_sqlite
+            from openai_pipeline.pipeline_stack.catia_agents.layer3_tolerance_dmu_agent import run_layer3_dmu_tolerance_stage
         except ImportError:
             return {
                 "status": "failed",
@@ -516,7 +516,7 @@ def run_catia_layer3_nominal(args, output, target_part_number):
             }
 
     try:
-        return run_layer3_tolerance_sweep_to_sqlite(
+        return run_layer3_dmu_tolerance_stage(
             db_path=str(output["db_path"]),
             document_id=output.get("document_id"),
             drawing_part_number=output.get("result", {}).get("part_number"),
@@ -539,7 +539,7 @@ def run_catia_layer3_nominal(args, output, target_part_number):
 
 
 def run_pipeline_attempt(args, image_path, runtime_options):
-    return run_drawing_pipeline(
+    return run_layer1_2d_pipeline(
         image_path=str(image_path),
         document_id=args.document_id,
         drawing_role=args.drawing_role,
@@ -800,7 +800,7 @@ def main():
             print_progress(
                 "Layer 1 Stage 08/08 - Human Dimension Review: checking extraction coverage, approving/rejecting dimensions, and allowing manual additions"
             )
-            output["human_dimension_review"] = run_human_dimension_review(
+            output["human_dimension_review"] = run_layer1_human_review_stage(
                 result=output["result"],
                 db_path=str(output["db_path"]),
                 prepared_image_path=str(output["prepared_image_path"]),

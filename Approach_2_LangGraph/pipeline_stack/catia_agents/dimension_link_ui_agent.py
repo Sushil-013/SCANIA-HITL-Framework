@@ -643,7 +643,7 @@ class DimensionLinkApp:
         self.root.destroy()
 
 
-def run_dimension_link_ui_from_sqlite(db_path, document_id=None, catia_part_number=None, summary_json=None, progress_callback=None):
+def run_layer2_dimension_linking_stage(db_path, document_id=None, catia_part_number=None, summary_json=None, progress_callback=None):
     if tk is None or ttk is None or messagebox is None:
         raise RuntimeError("Tkinter is not available in this Python environment, so the link UI cannot be opened.")
 
@@ -706,9 +706,13 @@ def run_dimension_link_ui_from_sqlite(db_path, document_id=None, catia_part_numb
     return summary
 
 
+# Backward-compatible alias for existing integrations.
+run_dimension_link_ui_from_sqlite = run_layer2_dimension_linking_stage
+
+
 def main():
     args = parse_args()
-    summary = run_dimension_link_ui_from_sqlite(
+    summary = run_layer2_dimension_linking_stage(
         db_path=args.db,
         document_id=args.document_id,
         catia_part_number=args.catia_part_number,

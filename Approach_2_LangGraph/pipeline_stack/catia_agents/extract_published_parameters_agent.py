@@ -372,7 +372,7 @@ def save_published_parameters_to_sqlite(
     return resolved_db_path
 
 
-def extract_published_parameters_to_sqlite(
+def run_layer2_parameter_extraction_stage(
     db_path,
     target_part_number,
     drawing_document_id=None,
@@ -456,9 +456,13 @@ def extract_published_parameters_to_sqlite(
             safe_com_call(root_document, "Close")
 
 
+# Backward-compatible alias for existing integrations.
+extract_published_parameters_to_sqlite = run_layer2_parameter_extraction_stage
+
+
 def main():
     args = parse_args()
-    summary = extract_published_parameters_to_sqlite(
+    summary = run_layer2_parameter_extraction_stage(
         db_path=args.db,
         target_part_number=args.part_number,
         drawing_document_id=args.document_id,

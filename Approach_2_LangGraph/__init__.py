@@ -1,6 +1,6 @@
 from .pipeline_stack.main_pipelines.drawing_pipeline import (
-    run_drawing_pipeline,
-    run_openai_extraction_stage,
+    run_layer1_2d_pipeline,
+    run_layer1_2d_extraction_stage,
     sanitize_output_name,
     save_pipeline_outputs,
 )
@@ -13,11 +13,13 @@ from .pipeline_stack.refinement.value_verifier import verify_dimension_values
 from .pipeline_stack.helpers.sqlite_importer import import_extraction_json_to_sqlite
 
 # Backward-compatible aliases for older imports.
+run_drawing_pipeline = run_layer1_2d_pipeline
+run_openai_extraction_stage = run_layer1_2d_extraction_stage
 open_drawing_image = load_input_drawing
 image_to_data_url = build_input_image_data_url
-extract_drawing_features = run_openai_extraction_stage
+extract_drawing_features = run_layer1_2d_extraction_stage
 save_openai_result = save_pipeline_outputs
-run_openai_pipeline = run_drawing_pipeline
+run_openai_pipeline = run_layer1_2d_pipeline
 import_json_to_db = import_extraction_json_to_sqlite
 
 __all__ = [
@@ -29,6 +31,8 @@ __all__ = [
     "prepare_pdf_clarity_image",
     "run_drawing_pipeline",
     "run_openai_extraction_stage",
+    "run_layer1_2d_pipeline",
+    "run_layer1_2d_extraction_stage",
     "sanitize_output_name",
     "save_pipeline_outputs",
     "refine_result_bboxes",

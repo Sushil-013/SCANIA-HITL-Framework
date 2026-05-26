@@ -164,7 +164,7 @@ def build_report_markdown() -> str:
 
         Main functions:
 
-        - `drawing_pipeline.run_openai_extraction_stage(...)`
+        - `drawing_pipeline.run_layer1_2d_extraction_stage(...)`
         - `drawing_pipeline.run_json_schema_request(...)`
         - `drawing_pipeline.merge_pass_results(...)`
         - `drawing_pipeline.merge_dimension_pass_results(...)`
@@ -347,7 +347,7 @@ def build_report_markdown() -> str:
 
         Main function:
 
-        - `main_pipelines/human_dimension_review.py -> run_human_dimension_review(...)`
+        - `main_pipelines/human_dimension_review.py -> run_layer1_human_review_stage(...)`
 
         Important supporting functions:
 
@@ -384,7 +384,7 @@ def build_report_markdown() -> str:
 
         Main functions:
 
-        - `drawing_pipeline.run_drawing_pipeline(...)`
+        - `drawing_pipeline.run_layer1_2d_pipeline(...)`
         - `drawing_pipeline.assess_fallback_need(...)`
 
         Current model defaults:
@@ -423,7 +423,7 @@ def build_report_markdown() -> str:
 
         Main function:
 
-        - `catia_agents/extract_published_parameters_agent.py -> extract_published_parameters_to_sqlite(...)`
+        - `catia_agents/extract_published_parameters_agent.py -> run_layer2_parameter_extraction_stage(...)`
 
         Supporting functions:
 
@@ -466,7 +466,7 @@ def build_report_markdown() -> str:
 
         Main function:
 
-        - `catia_agents/dimension_link_ui_agent.py -> run_dimension_link_ui_from_sqlite(...)`
+        - `catia_agents/dimension_link_ui_agent.py -> run_layer2_dimension_linking_stage(...)`
 
         Supporting functions:
 

@@ -1704,7 +1704,7 @@ def _run_tk_review(candidates, db_path, document_id, prepared_image_path, covera
     root.mainloop()
 
 
-def run_human_dimension_review(
+def run_layer1_human_review_stage(
     result,
     db_path,
     prepared_image_path,
@@ -1841,3 +1841,7 @@ def run_human_dimension_review(
         "dimension_log_lines": dimension_log_lines,
         "post_review_actions": post_review_actions,
     }
+
+
+# Backward-compatible alias for existing integrations.
+run_human_dimension_review = run_layer1_human_review_stage
