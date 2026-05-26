@@ -6,6 +6,16 @@ This software was developed as part of a Master's Thesis at **Linköping Univers
 
 ---
 
+## 🚀 Quick Start for Scania Engineers: SCANVA 3.0 (App)
+
+For ease of use within the Scania enterprise environment, the primary architecture of this framework has been compiled into a standalone Windows executable named **SCANVA 3.0**. 
+
+**No Python installation, virtual environments, or terminal commands are required.** 👉 **[Download SCANVA 3.0 from GitHub Releases](../../releases)**
+
+*(Note: The executable securely integrates with the Windows Credential Manager to handle API keys. For full instructions on running the app, please read the [Primary Approach README](./Approach_1_SQLite_Tkinter/README.md)).*
+
+---
+
 ## 🔬 Research Methodology: Two Exploratory Approaches
 
 To thoroughly evaluate the best method for bridging this gap, this repository is structured as a **Monorepo** containing two distinct system architectures. Both approaches were developed, tested, and evaluated during our research.
@@ -13,7 +23,7 @@ To thoroughly evaluate the best method for bridging this gap, this repository is
 ### 📂 [APPROACH 1: SQLite & Tkinter Pipeline (Primary)](./Approach_1_SQLite_Tkinter)
 *Developed by Sushil Krishna*
 
-This is the primary pipeline selected for the final thesis case study. It prioritizes deterministic safety, strict Human-in-the-Loop (HITL) UI gates, multi-view coordinate camera targeting, and a central **SQLite Database** to air-gap probabilistic AI from the live CAD environment.
+This is the primary pipeline selected for the final thesis case study (and the architecture behind the SCANVA 3.0 app). It prioritizes deterministic safety, strict Human-in-the-Loop (HITL) UI gates, multi-view coordinate camera targeting, and a central **SQLite Database** to air-gap probabilistic AI from the live CAD environment.
 
 ### 📂 [APPROACH 2: OpenAI Pipeline & LangGraph (Alternate)](./Approach_2_LangGraph)
 *Developed by Sajath Salim*
@@ -22,31 +32,25 @@ This alternative approach explores high AI autonomy. It utilizes **LangGraph** f
 
 ---
 
-## 🛠️ Global Prerequisites
+## 💻 Developer Guide (Source Code Setup)
 
-Regardless of which approach you are running, the following system requirements apply:
+If you are an academic examiner or developer wishing to inspect, modify, or run the raw Python source code, please note the global prerequisites:
 * **Operating System:** Windows 10 or 11 (Strictly required for the PyWin32 COM API interaction with CATIA).
 * **Python:** Version `3.10.x` or higher.
-* **CAD Software:** CATIA V5 or ENOVIA VPM installed locally, with an active **SPA (Space Analysis)** license required for the DMU clash detection module.
+* **CAD Software:** CATIA V5 or ENOVIA VPM installed locally, with an active **SPA (Space Analysis)** license.
 * **API Access:** An active OpenAI API key.
 
----
+Because each pipeline relies on different architectural paradigms, they operate completely independently. Navigate to the specific folder of the approach you wish to run for exact setup instructions:
 
-## 🚀 Where to Start
-
-Because each pipeline relies on different architectural paradigms, they operate completely independently and maintain their own dependencies, virtual environments, and execution scripts. 
-
-Please navigate to the specific folder of the approach you wish to run and read its dedicated `README.md` for step-by-step setup instructions:
-
-* **For the classic Tkinter + SQLite flow, read:** [`Approach_1_SQLite_Tkinter/README.md`](./Approach_1_SQLite_Tkinter/README.md)
-* **For the LangGraph/OpenAI flow, read:** [`Approach_2_LangGraph/README.md`](./Approach_2_LangGraph/README.md)
+* **For the primary SQLite/Tkinter code:** Read [`Approach_1_SQLite_Tkinter/README.md`](./Approach_1_SQLite_Tkinter/README.md)
+* **For the alternate LangGraph/CRAFT code:** Read [`Approach_2_LangGraph/README.md`](./Approach_2_LangGraph/README.md)
 
 ---
 
 ## 📖 Comprehensive Documentation
 
-For a comprehensive, step-by-step User Manual on how to operate the HITL UI, map parameters, and interpret the final HTML engineering reports, please visit our overarching project Wiki:
+For a comprehensive, step-by-step User Manual on how to operate the HITL UIs, map parameters, and interpret the final HTML engineering reports, please visit our overarching project Wiki:
 
-👉 SCANIA HITL Framework -  **[GitHub Wiki](https://github.com/Sushil-013/SCANIA-HITL-Framework/wiki)**.
+👉 **[SCANIA HITL Framework - Official GitHub Wiki](https://github.com/Sushil-013/SCANIA-HITL-Framework/wiki)**
 
-(The Wiki also includes deep dives into the system architecture, mathematical boundary calculations for MMC/LMC, database schemas, and CATIA API integration logic).
+*(The Wiki also includes deep dives into the system architecture, mathematical boundary calculations for MMC/LMC, database schemas, and CATIA API integration logic).*
