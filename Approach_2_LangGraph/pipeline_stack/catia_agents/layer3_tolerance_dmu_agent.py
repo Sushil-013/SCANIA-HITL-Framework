@@ -1386,7 +1386,6 @@ def run_dmu_cycle(
         summary_payload["current_workbench"] = current_workbench
         return summary_payload
 
-
     finally:
         cleanup_temporary_clashes(root_product, temporary_clash_names)
         cleanup_temporary_groups(root_product, scope.temporary_group_names)
