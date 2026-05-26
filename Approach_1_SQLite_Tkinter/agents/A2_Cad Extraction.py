@@ -1,10 +1,15 @@
 import sqlite3
 import re
+import sys
+import pythoncom
 import win32com.client
 import os
 
-# Always resolve the DB relative to the project root (one level up from this file)
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
+# Always resolve DB to the project root (or next to the .exe when frozen).
+if getattr(sys, 'frozen', False):
+    DB_PATH = os.path.join(os.path.dirname(sys.executable), 'eats_validation.db')
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
 
 # =============================================================
 # DATABASE SETUP
@@ -328,6 +333,7 @@ def run_agent_2_structural_fetch():
 
     # --- Connect to CATIA ---
     try:
+        pythoncom.CoInitialize()   # Required when called from a non-COM-initialised thread (e.g. PyInstaller windowed EXE)
         catia = win32com.client.Dispatch("CATIA.Application")
         product_doc = catia.ActiveDocument
         main_product = product_doc.Product

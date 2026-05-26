@@ -25,7 +25,7 @@ The framework is orchestrated by a unified `CustomTkinter` Master Application (`
 >         │   captures annotated clash evidence, records HITL decision
 >         ▼
 >   Report Generator
->         Standalone HTML report generated for engineering review
+>         Stand-alone HTML report generated for engineering review
 > ```
 
 ---
@@ -84,16 +84,41 @@ The framework relies on a local SQLite database (`eats_validation.db`) to mainta
 
 ---
 
-## 🛠️ Setup & Installation
+## 🚀 Usage Guide for Scania Engineers (Standalone App)
+
+For ease of use within the Scania enterprise environment, this entire pipeline has been compiled into a single, standalone Windows executable. **No Python installation, virtual environments, or terminal commands are required.**
 
 ### Prerequisites
-* **Operating System:** Windows 10 or 11 (Strictly required for the PyWin32 COM API interaction with CATIA).
-* **Python:** Version 3.10 or higher.
-* **CAD Software:** CATIA V5 or ENOVIA VPM installed locally, with an active **SPA (Space Analysis)** license required for the DMU clash detection module.
-* **API Access:** An active OpenAI API key (for Layer 1 GPT-4o vision extraction).
+* Windows 10 or 11.
+* CATIA V5 or ENOVIA VPM open locally with an active SPA license.
+* An active OpenAI API key.
+
+### How to Run
+1. Download the latest `SCANIA_HITL_Framework.exe` from the **[Releases](../../releases)** page on this GitHub repository.
+2. Place the `.exe` inside an empty folder on your machine.
+3. Double-click the `.exe` to launch the application.
+4. **API Key Authentication:** * On first launch, the app will display a secure prompt asking for your OpenAI API Key. 
+   * It will safely encrypt and store this key in your **Windows Credential Manager**.
+   * On subsequent launches, the app will detect the saved key and simply ask for your permission to use it, preventing the need to re-paste it or manage hidden `.env` files.
+5. The Master Control Center will open. Run your validation pipeline, and all databases and HTML reports will auto-generate right next to the executable.
+
+---
+
+## 💻 Developer Guide (Source Code Setup)
+
+If you are an academic examiner or developer wishing to inspect, run, or build the raw source code, please follow these steps:
 
 ### Installation
+
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/Sushil-013/SCANIA-HITL-Framework.git](https://github.com/Sushil-013/SCANIA-HITL-Framework.git)
+   git clone https://github.com/Sushil-013/SCANIA-HITL-Framework.git
    cd SCANIA-HITL-Framework
+   ```
+
+2. **Set up the virtual environment** inside the `Approach_1_SQLite_Tkinter` directory:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   ```

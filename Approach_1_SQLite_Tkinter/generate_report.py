@@ -18,9 +18,16 @@ import base64
 import datetime
 import os
 import sqlite3
+import sys
 
-DB_PATH     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eats_validation.db")
-REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+# PyInstaller EXE: save DB and reports next to the .exe, not in the temp extraction dir.
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DB_PATH     = os.path.join(_BASE_DIR, "eats_validation.db")
+REPORTS_DIR = os.path.join(_BASE_DIR, "reports")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

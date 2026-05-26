@@ -4,7 +4,11 @@ database/*.db
 *.pdf
 *.CATProduct
 *.CATPart
-
+*.db
+*.sqlite
+*.sqlite3
+reports/
+*.ico
 # Ignore Temporary Images
 *.png
 *.jpg
@@ -22,3 +26,10 @@ reports/
 *.html
 # Ignore Scania input drawings
 agents/Drawings/
+
+# PyInstaller build folders
+build/
+dist/
+*.spec
+build_dist/
+build_work/

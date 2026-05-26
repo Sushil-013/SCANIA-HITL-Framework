@@ -1,10 +1,14 @@
 import sqlite3
+import sys
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 
-# Always point at the project-root DB regardless of working directory
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
+# Always point at the project-root DB regardless of working directory (or next to .exe when frozen).
+if getattr(sys, 'frozen', False):
+    DB_PATH = os.path.join(os.path.dirname(sys.executable), 'eats_validation.db')
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
 
 
 # ──────────────────────────────────────────────────────────────────────────────

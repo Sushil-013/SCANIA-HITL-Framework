@@ -15,16 +15,30 @@ from PIL import Image
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-# Always point at Approach_1_SQLite_Tkinter/eats_validation.db regardless of CWD
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
+# Always point at eats_validation.db in the project root (or next to the .exe when frozen).
+if getattr(sys, 'frozen', False):
+    DB_PATH = os.path.join(os.path.dirname(sys.executable), 'eats_validation.db')
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
 
 # Injected by master_app.py before import so Toplevel windows use the
 # existing Tk root instead of spawning a second one.
 _MASTER_ROOT = None
 
-# Load the keys from your hidden .env file
+# ── API key resolution ────────────────────────────────────────────────────────
+# Priority: 1) Windows Credential Manager (keyring)  2) os.environ / .env file
+# master_app.py calls keyring and sets os.environ["OPENAI_API_KEY"] before
+# loading this module, so os.getenv() below will always find it when running
+# inside the EXE.  The load_dotenv() call below covers standalone dev runs.
 load_dotenv()
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_api_key = os.environ.get("OPENAI_API_KEY", "")
+if not _api_key:
+    try:
+        import keyring as _kr
+        _api_key = _kr.get_password("SCANIA_HITL_Framework", "openai_api_key") or ""
+    except Exception:
+        pass
+client = openai.OpenAI(api_key=_api_key)
 
 # ===========================================================================
 # ARCHITECTURE -- Tiled-Vision Linear Pipeline

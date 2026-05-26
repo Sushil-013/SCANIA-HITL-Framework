@@ -49,10 +49,22 @@ except ImportError:
         "customtkinter is not installed.\n"
         "Run:  pip install customtkinter"
     )
+try:
+    import keyring
+except ImportError:
+    keyring = None   # graceful fallback — app still works via .env
 
 # ── Project paths ─────────────────────────────────────────────────────────────
-ROOT_DIR    = os.path.dirname(os.path.abspath(__file__))
-AGENTS_DIR  = os.path.join(ROOT_DIR, "agents")
+# ROOT_DIR  → persistent folder for DB / reports (next to .exe when frozen,
+#             otherwise the Approach_1_SQLite_Tkinter directory).
+# AGENTS_DIR → where agent .py files live (sys._MEIPASS/agents when frozen —
+#              that is PyInstaller's temp extraction dir for bundled source).
+if getattr(sys, 'frozen', False):
+    ROOT_DIR   = os.path.dirname(sys.executable)
+    AGENTS_DIR = os.path.join(getattr(sys, '_MEIPASS', ROOT_DIR), "agents")
+else:
+    ROOT_DIR   = os.path.dirname(os.path.abspath(__file__))
+    AGENTS_DIR = os.path.join(ROOT_DIR, "agents")
 if AGENTS_DIR not in sys.path:
     sys.path.insert(0, AGENTS_DIR)
 
@@ -202,7 +214,7 @@ class MasterApp(ctk.CTk):
         ctk.set_appearance_mode("light")
         ctk.set_default_color_theme("blue")
 
-        self.title("SCANIA HITL — Master Control Center")
+        self.title("SCANIA HITL — Geometric Validation Assistant")
         self.geometry("1280x820")
         self.minsize(1024, 680)
         self.configure(fg_color=self._MAIN_BG)
@@ -219,6 +231,10 @@ class MasterApp(ctk.CTk):
         self._switch_panel("Perception Layer")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # ── API key: load from Credential Manager on startup ─────────────────
+        # Schedule after mainloop starts so the window is visible first.
+        self.after(300, self._ensure_api_key)
 
     # =========================================================================
     # LAYOUT CONSTRUCTION
@@ -349,12 +365,214 @@ class MasterApp(ctk.CTk):
 
         # Spacer then version footer
         ctk.CTkFrame(self._sidebar, fg_color="transparent").pack(fill="both", expand=True)
+
+        # API key button — always visible at the bottom of the sidebar
+        ctk.CTkButton(
+            self._sidebar,
+            text="  🔑  API Key",
+            anchor="w",
+            height=34,
+            corner_radius=8,
+            font=ctk.CTkFont("Segoe UI", 11),
+            fg_color="transparent",
+            hover_color="#006678",
+            text_color="#80c4cc",
+            command=lambda: self._show_api_key_dialog(force=True),
+        ).pack(fill="x", padx=10, pady=(0, 4))
+
         ctk.CTkLabel(
             self._sidebar,
-            text="v2.0  |  Python " + sys.version[:6],
+            text="v3.0  |  Python " + sys.version[:6],
             font=ctk.CTkFont("Segoe UI", 9),
             text_color="#6abdc5",
         ).pack(pady=(0, 14))
+
+    # =========================================================================
+    # API KEY MANAGEMENT
+    # =========================================================================
+
+    _KR_SERVICE = "SCANIA_HITL_Framework"
+    _KR_USER    = "openai_api_key"
+
+    def _get_stored_key(self) -> str:
+        """Read API key: Credential Manager → os.environ → .env fallback."""
+        key, _ = self._get_key_with_source()
+        return key
+
+    def _get_key_with_source(self) -> tuple:
+        """Returns (api_key, source) where source is 'credential', 'env', or None."""
+        # 1. Windows Credential Manager (keyring) — user explicitly saved here
+        if keyring:
+            try:
+                val = keyring.get_password(self._KR_SERVICE, self._KR_USER)
+                if val:
+                    return val, 'credential'
+            except Exception:
+                pass
+        # 2. System / process environment variable — could be from another tool
+        env_val = os.environ.get("OPENAI_API_KEY", "")
+        if env_val:
+            return env_val, 'env'
+        return "", None
+
+    def _save_key(self, api_key: str):
+        """Persist key in Windows Credential Manager and current process env."""
+        os.environ["OPENAI_API_KEY"] = api_key
+        if keyring:
+            try:
+                keyring.set_password(self._KR_SERVICE, self._KR_USER, api_key)
+            except Exception as e:
+                print(f"⚠  Could not save to Credential Manager: {e}")
+
+    def _ensure_api_key(self):
+        """Always show the API key dialog on startup so the user confirms which key is active."""
+        self._show_api_key_dialog(force=False)
+
+    def _show_api_key_dialog(self, force: bool = False):
+        """Modal dialog to confirm / enter / update the OpenAI API key.
+
+        Modes:
+          • force=True  → update flow (called from sidebar button)
+          • force=False → startup flow: always shown so user sees which key is active
+            - source='credential' → green confirm banner (pre-filled, one-click)
+            - source='env'        → orange warning (found in system env var)
+            - source=None         → normal entry (no key found)
+        """
+        existing, source = self._get_key_with_source()
+
+        win = ctk.CTkToplevel(self)
+        win.title("OpenAI API Key")
+        win.geometry("520x360")
+        win.resizable(False, False)
+        win.grab_set()
+        win.lift()
+        win.focus_force()
+
+        # Header
+        hdr = ctk.CTkFrame(win, fg_color=self._ACCENT, corner_radius=0, height=48)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+        ctk.CTkLabel(
+            hdr, text="  🔑  OpenAI API Key",
+            font=ctk.CTkFont("Segoe UI", 14, "bold"),
+            text_color="white", anchor="w"
+        ).pack(side="left", padx=16, fill="y")
+
+        body = ctk.CTkFrame(win, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=24, pady=16)
+
+        # ── Source-aware banner ──────────────────────────────────────────────
+        if force:
+            banner_color, banner_text = None, None
+            desc = "Update the key stored securely in Windows Credential Manager."
+        elif source == 'credential':
+            banner_color = "#d1fae5"   # light green
+            banner_text  = "✅  Key found in Windows Credential Manager. Confirm to continue."
+            desc = "The key below is already saved on this machine. You can use it as-is or replace it."
+        elif source == 'env':
+            banner_color = "#fff3cd"   # amber
+            banner_text  = "⚠  Key detected from a system Environment Variable — NOT from this app."
+            desc = (
+                "An OPENAI_API_KEY was found in your system environment variables\n"
+                "(possibly set by another tool, e.g. Cursor, OpenAI CLI).\n"
+                "Please confirm this is YOUR key, or enter a different one."
+            )
+        else:
+            banner_color, banner_text = None, None
+            desc = (
+                "No API key found. Enter your OpenAI key below.\n"
+                "It will be stored securely in Windows Credential Manager\n"
+                "— never in a plain-text file."
+            )
+
+        if banner_text:
+            banner = ctk.CTkFrame(body, fg_color=banner_color, corner_radius=6)
+            banner.pack(fill="x", pady=(0, 10))
+            ctk.CTkLabel(
+                banner, text=banner_text,
+                font=ctk.CTkFont("Segoe UI", 11, "bold"),
+                text_color="#1a1a1a", anchor="w", wraplength=450
+            ).pack(padx=10, pady=8, anchor="w")
+
+        ctk.CTkLabel(
+            body, text=desc,
+            font=ctk.CTkFont("Segoe UI", 12),
+            text_color="#374151", justify="left", anchor="w", wraplength=460
+        ).pack(anchor="w", pady=(0, 12))
+
+        # Key entry row
+        entry_row = ctk.CTkFrame(body, fg_color="transparent")
+        entry_row.pack(fill="x")
+
+        key_var = ctk.StringVar(value=existing)
+        key_entry = ctk.CTkEntry(
+            entry_row,
+            textvariable=key_var,
+            show="•",
+            width=380, height=38,
+            font=ctk.CTkFont("Consolas", 12),
+            placeholder_text="sk-...",
+            fg_color="#f0f7f8", border_color=self._BORDER,
+        )
+        key_entry.pack(side="left", padx=(0, 8))
+
+        _showing = [False]
+        def _toggle_show():
+            _showing[0] = not _showing[0]
+            key_entry.configure(show="" if _showing[0] else "•")
+            show_btn.configure(text="Hide" if _showing[0] else "Show")
+        show_btn = ctk.CTkButton(
+            entry_row, text="Show", width=60, height=38,
+            font=ctk.CTkFont("Segoe UI", 11),
+            fg_color="#6b7280", hover_color="#4b5563",
+            command=_toggle_show
+        )
+        show_btn.pack(side="left")
+
+        status_lbl = ctk.CTkLabel(
+            body, text="",
+            font=ctk.CTkFont("Segoe UI", 11),
+            text_color="#dc2626", anchor="w"
+        )
+        status_lbl.pack(anchor="w", pady=(8, 0))
+
+        # Buttons
+        btn_row = ctk.CTkFrame(body, fg_color="transparent")
+        btn_row.pack(anchor="e", pady=(12, 0))
+
+        def _save():
+            k = key_var.get().strip()
+            if not k.startswith("sk-") or len(k) < 20:
+                status_lbl.configure(text="⚠  Key must start with 'sk-' and be at least 20 characters.")
+                return
+            self._save_key(k)
+            src_label = "confirmed from environment" if (source == 'env' and k == existing) else "saved to Windows Credential Manager"
+            print(f"✅  OpenAI API key {src_label}.")
+            win.destroy()
+
+        def _cancel():
+            if not self._get_stored_key():
+                status_lbl.configure(text="⚠  A key is required to use the Perception Agent.")
+                return
+            win.destroy()
+
+        # Label the confirm button based on context
+        confirm_label = "Confirm & Continue" if (not force and source in ('credential', 'env')) else "Save & Continue"
+        ctk.CTkButton(
+            btn_row, text=confirm_label, width=180, height=36,
+            font=ctk.CTkFont("Segoe UI", 12, "bold"),
+            fg_color=self._ACCENT, hover_color=self._ACCENT_HOV,
+            command=_save
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row, text="Cancel", width=80, height=36,
+            font=ctk.CTkFont("Segoe UI", 12),
+            fg_color="#6b7280", hover_color="#4b5563",
+            command=_cancel
+        ).pack(side="left")
+
+        win.protocol("WM_DELETE_WINDOW", _cancel)
 
     # =========================================================================
     # NAVIGATION

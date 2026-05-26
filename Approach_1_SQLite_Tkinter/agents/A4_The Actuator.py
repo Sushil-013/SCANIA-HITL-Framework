@@ -1,6 +1,7 @@
 ﻿import sqlite3
 import sys
 import traceback
+import pythoncom
 import win32com.client
 import time
 import os
@@ -11,7 +12,11 @@ import tkinter as tk
 from tkinter import font as tkfont
 from PIL import Image, ImageDraw, ImageTk, ImageFont, ImageFilter
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
+# Persistent path: next to the .exe when frozen, otherwise project root.
+if getattr(sys, 'frozen', False):
+    DB_PATH = os.path.join(os.path.dirname(sys.executable), 'eats_validation.db')
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'eats_validation.db')
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1708,6 +1713,7 @@ def run_agent_3_actuation():
 
     # ── Connect to CATIA first — need active doc name for assembly filter ─
     try:
+        pythoncom.CoInitialize()   # Required when called from a non-COM-initialised thread (e.g. PyInstaller windowed EXE)
         catia           = win32com.client.Dispatch("CATIA.Application")
         active_doc      = catia.ActiveDocument
         root_product    = active_doc.Product
@@ -1938,14 +1944,9 @@ def run_agent_3_actuation():
 
     # ── Auto-generate HTML report ─────────────────────────────────────────────
     try:
-        import importlib, sys as _sys
-        _rep_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                 "generate_report.py")
-        import importlib.util as _ilu
-        _spec = _ilu.spec_from_file_location("generate_report", _rep_path)
-        _mod  = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        _mod.generate_html_report()
+        # Standard import — works correctly both in normal Python and PyInstaller EXE.
+        import generate_report
+        generate_report.generate_html_report()
     except Exception as _re:
         print(f"⚠  Report generation failed (non-fatal): {_re}")
 
