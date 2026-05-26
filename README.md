@@ -8,7 +8,7 @@ This software was developed as part of a Master's Thesis at **Linköping Univers
 
 ## 🚀 Quick Start for Scania Engineers: SCANVA 3.0 (App)
 
-For ease of use within the Scania enterprise environment, the primary architecture of this framework has been compiled into a standalone Windows executable named **SCANVA 3.0**. 
+For ease of use within the Scania enterprise environment, the primary architecture of this framework has been compiled into a standalone Windows executable Application named **SCANVA 3.1**. 
 
 **No Python installation, virtual environments, or terminal commands are required.** 👉 **[Download SCANVA 3.0 from GitHub Releases](../../releases)**
 
