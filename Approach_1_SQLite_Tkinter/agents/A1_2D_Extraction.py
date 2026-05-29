@@ -672,6 +672,7 @@ def logical_layer_hitl_review(final_json):
         stats_frame = tk.Frame(win, bg=CARD, height=32)
         stats_frame.pack(fill="x")
         stats_frame.pack_propagate(False)
+        tk.Frame(stats_frame, bg="#9FC8CD", height=1).pack(fill="x")
         stats_lbl = tk.Label(
             stats_frame, text="",
             font=("Consolas", 10),
@@ -693,18 +694,21 @@ def logical_layer_hitl_review(final_json):
         style.theme_use("clam")
         style.configure(
             "HITL.Treeview",
-            background="#0d1117", foreground=FG,
-            fieldbackground="#0d1117",
-            rowheight=24,
+            background="#F0F6F7", foreground="#0D2B2E",
+            fieldbackground="#F0F6F7",
+            rowheight=26,
             font=("Consolas", 10),
         )
         style.configure(
             "HITL.Treeview.Heading",
-            background=CARD, foreground="#58a6ff",
+            background="#D0E8EB", foreground="#004852",
             font=("Segoe UI", 10, "bold"),
             relief="flat"
         )
-        style.map("HITL.Treeview", background=[("selected", ACCENT)])
+        # Must also set foreground in map — Windows ttk ignores configure() for row text
+        style.map("HITL.Treeview",
+                  background=[("selected", "#004852"), ("", "#F0F6F7")],
+                  foreground=[("selected", "#FFFFFF"), ("", "#0D2B2E")])
 
         col_ids = [c[0] for c in _TREE_COLS]
         tree = ttk.Treeview(

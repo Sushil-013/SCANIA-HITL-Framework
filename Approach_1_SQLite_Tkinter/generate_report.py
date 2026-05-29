@@ -191,14 +191,14 @@ def generate_html_report(db_path: str = DB_PATH,
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
       font-family: "Segoe UI", Arial, sans-serif;
-      background: #f0f2f5;
-      color: #1a1a2e;
+      background: #F0F3F8;
+      color: #0D1B3E;
       padding: 24px;
     }}
 
     /* ── Header ── */
     .header {{
-      background: linear-gradient(135deg, #1a2744 0%, #2c3e6b 100%);
+      background: linear-gradient(135deg, #002E35 0%, #004852 60%, #006B7A 100%);
       color: #fff;
       padding: 28px 32px;
       border-radius: 10px;
@@ -206,14 +206,27 @@ def generate_html_report(db_path: str = DB_PATH,
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
+      border-bottom: 4px solid #FDB913;
     }}
-    .header h1 {{ font-size: 22px; margin-bottom: 6px; }}
-    .header .meta {{ font-size: 13px; opacity: .8; line-height: 1.7; }}
+    .header h1 {{ font-size: 22px; margin-bottom: 6px; letter-spacing: .3px; }}
+    .header .meta {{ font-size: 13px; opacity: .85; line-height: 1.8; }}
     .header .stamp {{
       text-align: right;
       font-size: 12px;
-      opacity: .75;
+      opacity: .80;
       white-space: nowrap;
+    }}
+    .header .traton-badge {{
+      display: inline-block;
+      background: #FDB913;
+      color: #002E35;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
     }}
 
     /* ── KPI strip ── */
@@ -228,13 +241,15 @@ def generate_html_report(db_path: str = DB_PATH,
       border-radius: 8px;
       padding: 16px 20px;
       text-align: center;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      box-shadow: 0 1px 6px rgba(0,72,82,.12);
+      border-top: 3px solid #004852;
     }}
-    .kpi .num {{ font-size: 32px; font-weight: 700; }}
-    .kpi .lbl {{ font-size: 12px; color: #666; margin-top: 4px; }}
-    .kpi.red  .num {{ color: #c0392b; }}
-    .kpi.green .num {{ color: #27ae60; }}
-    .kpi.blue  .num {{ color: #2980b9; }}
+    .kpi .num {{ font-size: 32px; font-weight: 700; color: #004852; }}
+    .kpi .lbl {{ font-size: 12px; color: #5A6A85; margin-top: 4px; font-weight: 500; }}
+    .kpi.red  .num {{ color: #B91C1C; }}
+    .kpi.green .num {{ color: #166534; }}
+    .kpi.blue  .num {{ color: #004852; }}
+    .kpi.gold  .num {{ color: #92400E; }}
 
     /* ── Card ── */
     .card {{
@@ -242,16 +257,18 @@ def generate_html_report(db_path: str = DB_PATH,
       border-radius: 8px;
       padding: 0;
       margin-bottom: 24px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      box-shadow: 0 1px 6px rgba(0,72,82,.12);
       overflow: hidden;
+      border: 1px solid #C0D8DB;
     }}
     .card-header {{
-      background: #2c3e6b;
+      background: linear-gradient(90deg, #004852 0%, #006B7A 100%);
       color: #fff;
       padding: 12px 20px;
       font-size: 14px;
       font-weight: 600;
       letter-spacing: .4px;
+      border-left: 4px solid #FDB913;
     }}
 
     /* ── Tables ── */
@@ -261,33 +278,33 @@ def generate_html_report(db_path: str = DB_PATH,
       font-size: 13px;
     }}
     th {{
-      background: #eef1f7;
+      background: #E0EEF0;
       padding: 10px 14px;
       text-align: left;
-      font-weight: 600;
+      font-weight: 700;
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: .5px;
-      color: #444;
-      border-bottom: 2px solid #d0d7e8;
+      color: #004852;
+      border-bottom: 2px solid #9FC8CD;
     }}
     td {{
       padding: 10px 14px;
-      border-bottom: 1px solid #f0f2f5;
+      border-bottom: 1px solid #C0D8DB;
       vertical-align: middle;
     }}
     tr:last-child td {{ border-bottom: none; }}
-    tr.row-clash {{ background: #fff8f8; }}
-    tr.row-clear {{ background: #f8fff8; }}
+    tr.row-clash {{ background: #FFF5F5; }}
+    tr.row-clear {{ background: #F5FBF7; }}
     tr.row-clash:hover, tr.row-clear:hover {{
-      background: #e8f0fe;
+      background: #D9EEF0;
       transition: background .15s;
     }}
 
     /* ── Summary cells ── */
-    td.fail {{ color: #c0392b; font-weight: 600; }}
-    td.pass {{ color: #27ae60; font-weight: 600; }}
-    td.na   {{ color: #999; }}
+    td.fail {{ color: #B91C1C; font-weight: 700; }}
+    td.pass {{ color: #166534; font-weight: 700; }}
+    td.na   {{ color: #9CA3AF; }}
 
     /* ── Badges ── */
     .badge {{
@@ -298,10 +315,10 @@ def generate_html_report(db_path: str = DB_PATH,
       font-weight: 700;
       letter-spacing: .5px;
     }}
-    .badge.approve  {{ background: #d5f5e3; color: #1e8449; }}
-    .badge.reject   {{ background: #fde8e8; color: #c0392b; }}
-    .badge.override {{ background: #fef9e7; color: #b7770d; }}
-    .badge.auto     {{ background: #eaf3fb; color: #2471a3; }}
+    .badge.approve  {{ background: #DCFCE7; color: #166534; }}
+    .badge.reject   {{ background: #FEE2E2; color: #B91C1C; }}
+    .badge.override {{ background: #FEF9C3; color: #92400E; }}
+    .badge.auto     {{ background: #D9EEF0; color: #004852; }}
     .boundary-badge {{
       display: inline-block;
       padding: 2px 8px;
@@ -309,8 +326,8 @@ def generate_html_report(db_path: str = DB_PATH,
       font-size: 11px;
       font-weight: 700;
     }}
-    .boundary-badge.mmc {{ background: #d6eaf8; color: #1a5276; }}
-    .boundary-badge.lmc {{ background: #fdebd0; color: #784212; }}
+    .boundary-badge.mmc {{ background: #CCE8EB; color: #004852; }}
+    .boundary-badge.lmc {{ background: #FEF3C7; color: #92400E; }}
 
     .drawing-tag {{
       display: inline-block;
@@ -318,23 +335,28 @@ def generate_html_report(db_path: str = DB_PATH,
       border-radius: 4px;
       font-size: 11px;
       font-weight: 600;
-      background: #eef1f7;
-      color: #2c3e6b;
+      background: #D9EEF0;
+      color: #004852;
     }}
     /* ── Footer ── */
     .footer {{
       text-align: center;
       font-size: 11px;
-      color: #aaa;
+      color: #8896B3;
       margin-top: 24px;
+      padding: 12px 0;
+      border-top: 1px solid #9FC8CD;
     }}
+    .footer strong {{ color: #004852; }}
 
     /* ── Click-to-expand hint ── */
     .hint {{
       font-size: 12px;
-      color: #888;
+      color: #5A6A85;
       padding: 8px 20px 12px;
       font-style: italic;
+      background: #F2FAFB;
+      border-bottom: 1px solid #C0D8DB;
     }}
   </style>
   <script>
@@ -350,9 +372,10 @@ def generate_html_report(db_path: str = DB_PATH,
 <!-- ── Header ── -->
 <div class="header">
   <div>
-    <h1>&#9881;  EATS — DMU Validation Report</h1>
+    <div class="traton-badge">TRATON Group &nbsp;·&nbsp; Scania CV AB</div>
+    <h1>&#9881;&nbsp; EATS — DMU Clash Validation Report</h1>
     <div class="meta">
-      <span>&#127981; Assembly&nbsp;:&nbsp; <strong>{assembly}</strong></span>
+      <span>&#127981;&nbsp; Assembly&nbsp;:&nbsp; <strong>{assembly}</strong></span>
     </div>
   </div>
   <div class="stamp">
@@ -422,7 +445,7 @@ def generate_html_report(db_path: str = DB_PATH,
 </div>
 
 <div class="footer">
-  EATS Validation Framework &nbsp;|&nbsp; Auto-generated report &nbsp;|&nbsp; {generated_at}
+  <strong>EATS Validation Framework</strong> &nbsp;·&nbsp; TRATON Group / Scania CV AB &nbsp;·&nbsp; Auto-generated &nbsp;·&nbsp; {generated_at}
 </div>
 
 </body>
