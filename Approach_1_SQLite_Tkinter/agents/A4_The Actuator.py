@@ -289,6 +289,26 @@ def _run_clash_analysis(root_product, target_part_name):
     print(f"    [DMU] {len(results)} conflict(s) involve target '{target_part_name}' "
           f"({total - len(results)} background clash(es) filtered out).")
 
+    # When DMU computed successfully but found zero conflicts at all, inject a
+    # synthetic PASS entry so _summarise_clash_results returns PASS instead of
+    # SPA_UNAVAILABLE (empty list is only valid when computation itself failed).
+    if total == 0 and len(results) == 0:
+        print(f"    [DMU] ✅ 0 total conflicts — parts are clear. Recording as PASS.")
+        results.append({
+            "type"          : "Clear",
+            "clearance"     : 0.0,
+            "is_clash"      : False,
+            "detail"        : "No conflicts detected (0 interferences between all parts)",
+            "first_product" : None,
+            "second_product": None,
+            "p1_name"       : "N/A",
+            "p2_name"       : "N/A",
+            "status"        : "Computed",
+            "comment"       : "No interference between parts",
+            "location"      : "N/A",
+            "clash_coords"  : None,
+        })
+
     # NOTE: no cleanup here — caller owns the lifecycle of new_clash
     return results, clashes, new_clash
 
