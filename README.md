@@ -28,8 +28,7 @@ This is the primary pipeline selected for the final thesis case study (and the a
 ### 📂 [APPROACH 2: OpenAI Pipeline & LangGraph (Alternate)](./Approach_2_LangGraph)
 *Developed by Sajath Salim*
 
-This alternative approach explores high AI autonomy. It utilizes **LangGraph** for node-based state orchestration and features a bundled, localized **CRAFT runtime** for precise bounding-box refinement and value verification without relying on external databases.
-
+This alternative approach explores high AI autonomy. It utilizes a sequential OpenAI-driven pipeline with CRAFT-based bounding-box refinement and value verification without relying on external databases.
 ---
 
 ## 💻 Developer Guide (Source Code Setup)
