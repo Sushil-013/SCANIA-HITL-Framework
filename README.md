@@ -30,7 +30,6 @@ This is the primary pipeline selected for the final thesis case study (and the a
 
 This alternative approach explores high AI autonomy. It utilizes a sequential OpenAI-driven pipeline with CRAFT-based bounding-box refinement and value verification without relying on external databases.
 ---
-
 ## 💻 Developer Guide (Source Code Setup)
 
 If you are an academic examiner or developer wishing to inspect, modify, or run the raw Python source code, please note the global prerequisites:
