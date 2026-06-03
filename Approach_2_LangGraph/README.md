@@ -71,7 +71,7 @@ $env:OPENAI_API_KEY = "your_openai_api_key_here"
 ### 3. Installation Notes
 * **Tkinter:** Used by the review UI and the Master UI. It normally comes pre-packaged with standard Windows Python and is not installed from `requirements.txt`.
 * **CATIA:** Layer 2 and Layer 3 physically require CATIA installed on a Windows machine.
-* **Transformers Version:** If `transformers==5.3.0.dev0` is not available on another machine, install the exact same build you used locally, or relax only that line to a compatible `transformers` version used with GLM-OCR.
+* **Transformers Version:** If `transformers==5.3.0` is not available on another machine, install the exact same build you used locally, or relax only that line to a compatible `transformers` version used with GLM-OCR.
 
 <details>
 <summary><b>📦 View Installed Dependency Snapshot</b></summary>
@@ -86,7 +86,7 @@ The current working environment used for this package relies on these direct ver
 * `scikit-image==0.21.0`
 * `torch==2.11.0`
 * `torchvision==0.26.0`
-* `transformers==5.3.0.dev0`
+* `transformers==5.3.0`
 * `accelerate==1.13.0`
 * `safetensors==0.7.0`
 * `python-pptx==1.0.2`
