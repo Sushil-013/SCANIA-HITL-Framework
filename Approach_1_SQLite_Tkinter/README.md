@@ -80,7 +80,7 @@ The framework relies on a local SQLite database (`eats_validation.db`) to mainta
 | `drawings` & `semantic_tolerances` | Stores the AI extraction results and drawing metadata. |
 | `catia_assemblies` & `catia_parameters` | Stores the 3D parametric data pulled directly from ENOVIA VPM. |
 | `human_mapping` | The relational bridge joining the 2D ID (`vlm_id`) to the 3D ID (`cad_id`). |
-| `dmu_mmc_results` & `dmu_lmc_results` | The final output tables storing the evaluated boundaries, parts involved, clash penetration depths, image paths, and human review decisions. |
+| `actuation_results` | The final output tables storing the evaluated boundaries, parts involved, clash penetration depths, image paths, and human review decisions. |
 
 ---
 
